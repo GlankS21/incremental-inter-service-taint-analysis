@@ -287,13 +287,20 @@ public class PaymentServiceImpl implements PaymentService {
         if (!(paymentGateway instanceof MockPaymentGateway mockGateway)) {
             throw ResourceNotFoundException.of("payment.error.not-found");
         }
-        PaymentTransaction charge = transactionTemplate.execute(status -> transactionRepository
-                .findByProviderAndProviderId(PaymentProvider.MOCK, providerPaymentId)
-                .filter(transaction -> transaction.getType() == TransactionType.CHARGE)
-                .filter(transaction -> paymentRepository.findById(transaction.getPaymentId())
-                        .map(payment -> caller.id().equals(payment.getUserId()))
-                        .orElse(false))
-                .orElseThrow(PaymentServiceImpl::paymentNotFound));
+        PaymentTransaction charge = transactionTemplate.execute(status -> {
+            PaymentTransaction found = transactionRepository
+                    .findByProviderAndProviderId(PaymentProvider.MOCK, providerPaymentId)
+                    .filter(transaction -> transaction.getType() == TransactionType.CHARGE)
+                    .orElseThrow(PaymentServiceImpl::paymentNotFound);
+            Payment payment = paymentRepository.findById(found.getPaymentId())
+                    .filter(owner -> caller.id().equals(owner.getUserId()))
+                    .orElseThrow(PaymentServiceImpl::paymentNotFound);
+            // A cancelled order, a finished payment or an attempt replaced by another must not be charged
+            if (payment.getStatus() != PaymentStatus.PENDING || !payment.isCurrentCharge(found) || !found.isPending()) {
+                throw new BusinessException("payment.error.retry-not-allowed");
+            }
+            return found;
+        });
         MockPaymentGateway.CardOutcome outcome = mockGateway.pay(providerPaymentId, cardNumber, expiry, threeDSecureCode);
         if (!outcome.threeDSecureRequired()) {
             applyChargeState(charge.getId(), outcome.payment());

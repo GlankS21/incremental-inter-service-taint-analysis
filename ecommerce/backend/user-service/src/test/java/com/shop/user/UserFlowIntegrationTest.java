@@ -8,7 +8,13 @@ import com.shop.common.event.UserRegisteredEvent;
 import com.shop.common.security.HmacJwtSupport;
 import com.shop.common.security.JwtClaimNames;
 import com.shop.common.security.JwtProperties;
+import com.shop.common.exception.BusinessException;
+import com.shop.user.dto.request.AddressRequest;
+import com.shop.user.dto.response.AddressResponse;
+import com.shop.user.dto.response.UserProfileResponse;
 import com.shop.user.repository.UserProfileRepository;
+import com.shop.user.service.AddressService;
+import com.shop.user.service.UserProfileService;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,10 +35,19 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -75,6 +90,10 @@ class UserFlowIntegrationTest {
     private RabbitTemplate rabbitTemplate;
     @Autowired
     private UserProfileRepository userProfileRepository;
+    @Autowired
+    private UserProfileService userProfileService;
+    @Autowired
+    private AddressService addressService;
 
     @Test
     void registrationEventCreatesProfile() throws Exception {
@@ -218,6 +237,129 @@ class UserFlowIntegrationTest {
                 .andExpect(jsonPath("$.data.length()").value(1))
                 .andExpect(jsonPath("$.data[0].recipientName").value("Owner Home"))
                 .andExpect(jsonPath("$.data[0].defaultAddress").value(true));
+    }
+
+    @Test
+    void parallelAddressCreationRespectsTheLimitAndKeepsOneDefault() throws Exception {
+        UUID userId = UUID.randomUUID();
+
+        List<Future<AddressResponse>> results = runConcurrently(AddressService.MAX_ADDRESSES_PER_USER + 2,
+                () -> addressService.createAddress(userId, "parallel@example.com", addressRequest(false)));
+
+        List<Throwable> failures = failures(results);
+        List<AddressResponse> addresses = addressService.listAddresses(userId);
+        assertThat(addresses).hasSize(results.size() - failures.size()).hasSizeLessThanOrEqualTo(
+                AddressService.MAX_ADDRESSES_PER_USER);
+        assertThat(failures).allSatisfy(failure -> assertThat(failure)
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("address.error.limit-reached"));
+        assertThat(addresses).filteredOn(AddressResponse::defaultAddress).hasSize(1);
+    }
+
+    @Test
+    void parallelFirstAddressesAreBothCreated() throws Exception {
+        UUID userId = UUID.randomUUID();
+        userProfileService.getOrCreateProfile(userId, "first-parallel@example.com");
+
+        List<Future<AddressResponse>> results = runConcurrently(2,
+                () -> addressService.createAddress(userId, "first-parallel@example.com", addressRequest(false)));
+
+        assertThat(failures(results)).isEmpty();
+        assertThat(addressService.listAddresses(userId)).hasSize(2)
+                .filteredOn(AddressResponse::defaultAddress).hasSize(1);
+    }
+
+    @Test
+    void parallelDefaultChangesKeepOneDefault() throws Exception {
+        UUID userId = UUID.randomUUID();
+        addressService.createAddress(userId, "default-parallel@example.com", addressRequest(false));
+        UUID second = addressService.createAddress(userId, "default-parallel@example.com", addressRequest(false)).id();
+        UUID third = addressService.createAddress(userId, "default-parallel@example.com", addressRequest(false)).id();
+        List<UUID> targets = List.of(second, third);
+        AtomicInteger next = new AtomicInteger();
+
+        List<Future<AddressResponse>> results = runConcurrently(targets.size(),
+                () -> addressService.setDefaultAddress(userId, targets.get(next.getAndIncrement())));
+
+        assertThat(failures(results)).isEmpty();
+        assertThat(addressService.listAddresses(userId)).filteredOn(AddressResponse::defaultAddress).hasSize(1);
+    }
+
+    @Test
+    void parallelFirstAccessesShareOneProfile() throws Exception {
+        for (int attempt = 0; attempt < 10; attempt++) {
+            UUID userId = UUID.randomUUID();
+
+            List<Future<UserProfileResponse>> results = runConcurrently(4,
+                    () -> userProfileService.getOrCreateProfile(userId, "First.Access@example.com"));
+
+            assertThat(failures(results)).isEmpty();
+            for (Future<UserProfileResponse> result : results) {
+                assertThat(result.get().id()).isEqualTo(userId);
+                assertThat(result.get().email()).isEqualTo("first.access@example.com");
+            }
+        }
+    }
+
+    @Test
+    void adminSearchTreatsLikeWildcardsLiterally() throws Exception {
+        UUID underscore = UUID.randomUUID();
+        UUID percent = UUID.randomUUID();
+        userProfileService.getOrCreateProfile(underscore, "under_score@example.com");
+        userProfileService.getOrCreateProfile(percent, "hundred%@example.com");
+        userProfileService.getOrCreateProfile(UUID.randomUUID(), "plain@example.com");
+        String admin = bearer(UUID.randomUUID(), "admin@example.com", "ROLE_ADMIN");
+
+        assertThat(searchProfileIds("_", admin)).containsExactly(underscore.toString());
+        assertThat(searchProfileIds("%", admin)).containsExactly(percent.toString());
+    }
+
+    private List<String> searchProfileIds(String keyword, String token) throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/users").param("keyword", keyword).param("size", "100")
+                        .header(HttpHeaders.AUTHORIZATION, token))
+                .andExpect(status().isOk())
+                .andReturn();
+        List<String> ids = new ArrayList<>();
+        objectMapper.readTree(result.getResponse().getContentAsString()).at("/data/content")
+                .forEach(profile -> ids.add(profile.get("id").asText()));
+        return ids;
+    }
+
+    private <T> List<Future<T>> runConcurrently(int threads, Callable<T> task) throws InterruptedException {
+        ExecutorService executor = Executors.newFixedThreadPool(threads);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            List<Future<T>> results = new ArrayList<>();
+            for (int i = 0; i < threads; i++) {
+                results.add(executor.submit(() -> {
+                    start.await();
+                    return task.call();
+                }));
+            }
+            start.countDown();
+            executor.shutdown();
+            assertThat(executor.awaitTermination(60, TimeUnit.SECONDS)).isTrue();
+            return results;
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private static List<Throwable> failures(List<? extends Future<?>> results) throws InterruptedException {
+        List<Throwable> failures = new ArrayList<>();
+        for (Future<?> result : results) {
+            try {
+                result.get();
+            } catch (ExecutionException ex) {
+                failures.add(ex.getCause());
+            }
+        }
+        return failures;
+    }
+
+    private static AddressRequest addressRequest(boolean makeDefault) {
+        return new AddressRequest("Иван Петров", "+79161234567", "ул. Тверская, д. 7", null, null, null,
+                "Москва", "125009", "RU", makeDefault);
     }
 
     private JsonNode createAddress(String token, String recipient, boolean makeDefault) throws Exception {

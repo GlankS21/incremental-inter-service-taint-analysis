@@ -85,7 +85,7 @@ public class OrderLifecycle {
                 null, now);
         enqueue(MessagingConstants.ORDER_CONFIRMED_KEY, order, new OrderConfirmedEvent(UUID.randomUUID(), now,
                 order.getId(), order.getOrderNumber(), order.getUserId(), order.getUserEmail(),
-                order.getTotalAmount(), order.getCurrency()));
+                order.getTotalAmount(), order.getCurrency(), order.getPaymentMethod().name()));
     }
 
     /**
@@ -100,7 +100,7 @@ public class OrderLifecycle {
         Instant now = clock.instant();
         order.changeStatus(OrderStatus.DELIVERED, note, adminId, now);
         enqueue(MessagingConstants.ORDER_DELIVERED_KEY, order, new OrderDeliveredEvent(UUID.randomUUID(), now,
-                order.getId(), order.getOrderNumber(), order.getUserId(), itemsOf(order)));
+                order.getId(), order.getOrderNumber(), order.getUserId(), order.getUserEmail(), itemsOf(order)));
     }
 
     /**

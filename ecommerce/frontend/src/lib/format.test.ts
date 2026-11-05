@@ -4,7 +4,9 @@ import {
   discountPercent,
   formatDate,
   formatDateTime,
+  formatDecimal,
   formatMoney,
+  formatPercent,
   labelled,
   NOTIFICATION_STATUS_TONE,
   ORDER_STATUS_TONE,
@@ -59,7 +61,17 @@ describe("labelled", () => {
 
   it("covers every status of the label maps", () => {
     expect(Object.keys(PRODUCT_STATUS_TONE)).toEqual(["DRAFT", "ACTIVE", "ARCHIVED"]);
-    expect(Object.keys(NOTIFICATION_STATUS_TONE)).toEqual(["PENDING", "SENT", "FAILED"]);
+    expect(Object.keys(NOTIFICATION_STATUS_TONE)).toEqual(["PENDING", "SENDING", "SENT", "FAILED", "EXPIRED"]);
     expect(labelled(CART_ITEM_STATUS_TONE, (value) => value).OUT_OF_STOCK.tone).toBe("danger");
+  });
+});
+
+describe("formatPercent / formatDecimal", () => {
+  it("formats ratios and averages the Russian way", () => {
+    expect(normalize(formatPercent(0.1234))).toBe("12,3 %");
+    expect(normalize(formatPercent(0))).toBe("0 %");
+    expect(formatPercent(null)).toBe("—");
+    expect(normalize(formatDecimal(12345.678))).toBe("12 345,7");
+    expect(formatDecimal(3)).toBe("3");
   });
 });

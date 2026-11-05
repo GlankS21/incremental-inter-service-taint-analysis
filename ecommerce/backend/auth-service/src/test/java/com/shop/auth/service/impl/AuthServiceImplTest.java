@@ -155,6 +155,20 @@ class AuthServiceImplTest {
     }
 
     @Test
+    void login_withPasswordBeyond72BytesFailsEvenIfItsPrefixIsTheStoredPassword() {
+        // bcrypt only looks at the first 72 bytes, so this input would otherwise match.
+        String stored = "Secret12" + "x".repeat(64);
+        UserAccount account = account(true);
+        account.setPasswordHash(new BCryptPasswordEncoder(4).encode(stored));
+        when(userAccountRepository.findByEmail("john@example.com")).thenReturn(Optional.of(account));
+
+        assertThatThrownBy(() -> authService.login(new LoginRequest("john@example.com", stored + "яя")))
+                .isInstanceOf(UnauthorizedException.class)
+                .hasMessage(AuthServiceImpl.INVALID_CREDENTIALS);
+        verify(tokenService, never()).issueTokens(any());
+    }
+
+    @Test
     void login_withDisabledAccountIsForbidden() {
         when(userAccountRepository.findByEmail("john@example.com")).thenReturn(Optional.of(account(false)));
 

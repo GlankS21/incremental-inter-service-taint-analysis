@@ -13,6 +13,7 @@ import com.shop.inventory.entity.InventoryItem;
 import com.shop.inventory.entity.MovementType;
 import com.shop.inventory.entity.StockMovement;
 import com.shop.inventory.mapper.InventoryMapperImpl;
+import com.shop.inventory.messaging.outbox.StockLevelNotifier;
 import com.shop.inventory.repository.InventoryItemRepository;
 import com.shop.inventory.repository.StockMovementRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,6 +42,8 @@ class InventoryServiceImplTest {
     private InventoryItemRepository inventoryItemRepository;
     @Mock
     private StockMovementRepository stockMovementRepository;
+    @Mock
+    private StockLevelNotifier stockLevelNotifier;
 
     private InventoryServiceImpl service;
     private final UUID adminId = UUID.randomUUID();
@@ -48,7 +51,7 @@ class InventoryServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new InventoryServiceImpl(inventoryItemRepository, stockMovementRepository, new InventoryMapperImpl(),
-                new InventoryProperties(7, null), new CommonMessagesAutoConfiguration().messageSource());
+                new InventoryProperties(7, null), new CommonMessagesAutoConfiguration().messageSource(), stockLevelNotifier);
     }
 
     @Test
@@ -67,6 +70,8 @@ class InventoryServiceImplTest {
         assertThat(movement.getValue().getOnHandChange()).isEqualTo(5);
         assertThat(movement.getValue().getOnHandAfter()).isEqualTo(15);
         assertThat(movement.getValue().getActorId()).isEqualTo(adminId);
+        // 10 on hand - 2 reserved could be sold before the adjustment
+        verify(stockLevelNotifier).stockChanged(item, 8);
     }
 
     @Test

@@ -3,7 +3,7 @@ import { getTranslations } from "next-intl/server";
 import { AccountRow } from "@/components/admin/AccountRow";
 import { Pagination, pageIndex } from "@/components/Pagination";
 import { PageTitle } from "@/components/ui";
-import { apiGet, getSession, query } from "@/lib/server/data";
+import { apiGet, getSession, keepPageInRange, query } from "@/lib/server/data";
 import { param, type SearchParams } from "@/lib/search-params";
 import type { Account, PageResponse } from "@/lib/types";
 
@@ -21,6 +21,7 @@ export default async function AdminAccountsPage({ searchParams }: { searchParams
     getTranslations("adminAccounts"),
     getTranslations("common"),
   ]);
+  keepPageInRange(page, accounts, "/admin/accounts", { email });
 
   return (
     <>

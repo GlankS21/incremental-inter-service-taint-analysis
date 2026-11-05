@@ -21,6 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Stream;
 
 @Service
 @RequiredArgsConstructor
@@ -67,6 +68,7 @@ public class CategoryServiceImpl implements CategoryService {
             throw new ConflictException("category.error.slug-taken", slug);
         }
 
+        lockForTreeChange(null, request.parentId());
         Category category = new Category();
         categoryMapper.updateFromRequest(request, category);
         category.setSlug(slug);
@@ -78,6 +80,7 @@ public class CategoryServiceImpl implements CategoryService {
     @Override
     @Transactional
     public CategoryResponse updateCategory(Long categoryId, CategoryRequest request) {
+        lockForTreeChange(categoryId, request.parentId());
         Category category = findCategory(categoryId);
         // Keep existing URLs stable: the slug changes only when explicitly requested
         if (request.slug() != null && !request.slug().equals(category.getSlug())) {
@@ -105,6 +108,19 @@ public class CategoryServiceImpl implements CategoryService {
             throw new BusinessException("category.error.has-products");
         }
         categoryRepository.delete(category);
+    }
+
+    /**
+     * Locks the category and its requested parent before the tree rules are checked, so that a concurrent
+     * change of either (moving the parent under another category, adding a child to the category) waits
+     * for this transaction and then sees its outcome. Called before the categories are loaded, which
+     * therefore reflect the locked rows.
+     */
+    private void lockForTreeChange(Long categoryId, Long parentId) {
+        List<Long> ids = Stream.of(categoryId, parentId).filter(Objects::nonNull).distinct().toList();
+        if (!ids.isEmpty()) {
+            categoryRepository.findAllForUpdateByIdIn(ids);
+        }
     }
 
     /**

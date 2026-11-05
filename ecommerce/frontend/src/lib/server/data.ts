@@ -1,6 +1,7 @@
 import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { ApiError } from "@/lib/errors";
+import { lastPageRedirect, type PageParams } from "@/lib/pagination";
 import { decodeAccessToken, type Session } from "@/lib/session";
 import type { ApiResponse, ErrorResponse } from "@/lib/types";
 import { ACCESS_COOKIE } from "./auth-cookies";
@@ -70,4 +71,12 @@ export function query(params: Record<string, string | number | boolean | null | 
   }
   const text = search.toString();
   return text ? `?${text}` : "";
+}
+
+/** A requested page past the end of a list redirects to its last page; see {@link lastPageRedirect}. */
+export function keepPageInRange(page: number, list: { totalPages: number }, basePath: string, params: PageParams): void {
+  const target = lastPageRedirect(page, list.totalPages, basePath, params);
+  if (target) {
+    redirect(target);
+  }
 }

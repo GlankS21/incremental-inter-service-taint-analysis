@@ -55,6 +55,10 @@ public class OutboxEvent implements Persistable<UUID> {
     @Column(name = "published_at")
     private Instant publishedAt;
 
+    /** Set when the row can never be published; the relay skips it from then on. */
+    @Column(name = "failed_at")
+    private Instant failedAt;
+
     @Column(nullable = false)
     private int attempts;
 

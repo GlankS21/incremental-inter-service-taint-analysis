@@ -5,7 +5,7 @@ import { ProductStatusSelect } from "@/components/admin/ProductStatusSelect";
 import { Pagination, pageIndex } from "@/components/Pagination";
 import { ButtonLink, PageTitle, Thumb } from "@/components/ui";
 import { formatMoney, PRODUCT_STATUS_TONE } from "@/lib/format";
-import { apiGet, query } from "@/lib/server/data";
+import { apiGet, keepPageInRange, query } from "@/lib/server/data";
 import { oneOf, param, positiveInt, type SearchParams } from "@/lib/search-params";
 import type { Category, PageResponse, ProductStatus, ProductSummary } from "@/lib/types";
 
@@ -31,6 +31,7 @@ export default async function AdminProductsPage({ searchParams }: { searchParams
     getTranslations("adminProducts"),
     getTranslations("productStatus"),
   ]);
+  keepPageInRange(page, products, "/admin/products", { keyword, status, categoryId });
 
   return (
     <>

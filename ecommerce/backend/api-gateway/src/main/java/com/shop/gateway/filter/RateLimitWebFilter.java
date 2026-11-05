@@ -33,11 +33,13 @@ public class RateLimitWebFilter implements WebFilter, Ordered {
 
     private static final String DEFAULT_POLICY = "default";
     private static final String AUTH_POLICY = "auth";
+    private static final String SEARCH_POLICY = "search";
 
     private final RateLimitProperties properties;
     private final ClientRateLimiter rateLimiter;
     private final ErrorResponseWriter errorResponseWriter;
     private final List<PathPattern> authPathPatterns;
+    private final List<PathPattern> searchPathPatterns;
 
     public RateLimitWebFilter(RateLimitProperties properties,
                               ClientRateLimiter rateLimiter,
@@ -45,9 +47,8 @@ public class RateLimitWebFilter implements WebFilter, Ordered {
         this.properties = properties;
         this.rateLimiter = rateLimiter;
         this.errorResponseWriter = errorResponseWriter;
-        this.authPathPatterns = properties.authPaths().stream()
-                .map(PathPatternParser.defaultInstance::parse)
-                .toList();
+        this.authPathPatterns = parse(properties.authPaths());
+        this.searchPathPatterns = parse(properties.searchPaths());
     }
 
     @Override
@@ -55,9 +56,19 @@ public class RateLimitWebFilter implements WebFilter, Ordered {
         if (!properties.enabled() || HttpMethod.OPTIONS.equals(exchange.getRequest().getMethod())) {
             return chain.filter(exchange);
         }
-        boolean authRequest = isAuthPath(exchange.getRequest().getPath().pathWithinApplication());
-        String policyName = authRequest ? AUTH_POLICY : DEFAULT_POLICY;
-        RateLimitPolicy policy = authRequest ? properties.authPolicy() : properties.defaultPolicy();
+        PathContainer path = exchange.getRequest().getPath().pathWithinApplication();
+        String policyName;
+        RateLimitPolicy policy;
+        if (matches(authPathPatterns, path)) {
+            policyName = AUTH_POLICY;
+            policy = properties.authPolicy();
+        } else if (matches(searchPathPatterns, path)) {
+            policyName = SEARCH_POLICY;
+            policy = properties.searchPolicy();
+        } else {
+            policyName = DEFAULT_POLICY;
+            policy = properties.defaultPolicy();
+        }
         String clientKey = ClientAddressWebFilter.clientAddress(exchange);
 
         RateLimitDecision decision = rateLimiter.tryAcquire(policyName, policy, clientKey);
@@ -78,7 +89,13 @@ public class RateLimitWebFilter implements WebFilter, Ordered {
         return 10;
     }
 
-    private boolean isAuthPath(PathContainer path) {
-        return authPathPatterns.stream().anyMatch(pattern -> pattern.matches(path));
+    private static List<PathPattern> parse(List<String> patterns) {
+        return patterns.stream()
+                .map(PathPatternParser.defaultInstance::parse)
+                .toList();
+    }
+
+    private static boolean matches(List<PathPattern> patterns, PathContainer path) {
+        return patterns.stream().anyMatch(pattern -> pattern.matches(path));
     }
 }

@@ -1,5 +1,6 @@
 package com.shop.payment.entity;
 
+import com.shop.common.util.TextUtils;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -101,7 +102,6 @@ public class Payment extends AuditableEntity {
     }
 
     public void setFailureReason(String reason) {
-        failureReason = reason == null || reason.length() <= MAX_REASON_LENGTH
-                ? reason : reason.substring(0, MAX_REASON_LENGTH);
+        failureReason = TextUtils.truncate(reason, MAX_REASON_LENGTH);
     }
 }

@@ -82,16 +82,17 @@ export function ProductForm({ categories, product }: Props) {
       if (product) {
         await api.put(`/products/${product.id}`, body);
         setResult({ ok: true });
+        setSaving(false);
         toast.success(tForm("saved"));
         router.refresh();
       } else {
         const created = await api.post<Product>("/products", body);
+        // Stays busy until the product's page opens: a second click would create a second product
         router.push(`/admin/products/${created.id}`);
       }
     } catch (error) {
-      setResult({ ok: false, error });
-    } finally {
       setSaving(false);
+      setResult({ ok: false, error });
     }
   };
 

@@ -21,6 +21,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.HttpHeaders;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mail.MailSendException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -38,13 +39,24 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
+import static org.hamcrest.Matchers.startsWith;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
@@ -94,6 +106,8 @@ class NotificationIntegrationTest {
     private NotificationRepository notificationRepository;
     @Autowired
     private NotificationService notificationService;
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     void sendsOneWelcomeEmailPerRegistration() throws Exception {
@@ -138,13 +152,16 @@ class NotificationIntegrationTest {
                 .filter(n -> userId.equals(n.getUserId()) && n.getStatus() == NotificationStatus.SENT).findFirst());
         assertThat(notification.getType()).isEqualTo(NotificationType.PASSWORD_RESET);
         assertThat(notification.getSubject()).isEqualTo("[TechShop] Сброс пароля");
-        assertThat(notification.getBody())
-                .contains("https://shop.example.com/reset-password?token=reset-token_123")
-                .contains("30 мин.");
+        assertThat(notification.getExpiresAt())
+                .isCloseTo(now.plus(Duration.ofMinutes(30)), within(1, ChronoUnit.MILLIS));
+        // The link is erased from the database once delivered
+        assertThat(notification.getBody()).isEqualTo(Notification.ERASED_BODY);
         ArgumentCaptor<SimpleMailMessage> mail = ArgumentCaptor.forClass(SimpleMailMessage.class);
         verify(mailSender, times(1)).send(mail.capture());
         assertThat(mail.getValue().getTo()).containsExactly("ivan.petrov@example.ru");
-        assertThat(mail.getValue().getText()).contains("reset-password?token=reset-token_123");
+        assertThat(mail.getValue().getText())
+                .contains("https://shop.example.com/reset-password?token=reset-token_123")
+                .contains("30 мин.");
 
         mockMvc.perform(get("/api/notifications").header(HttpHeaders.AUTHORIZATION, token(userId, "ROLE_CUSTOMER")))
                 .andExpect(status().isOk())
@@ -156,13 +173,12 @@ class NotificationIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.content[0].type").value("PASSWORD_RESET"))
                 .andExpect(jsonPath("$.data.content[0].body").doesNotExist());
-        // Resending uses the stored body
+        // The link is no longer stored, so a delivered reset e-mail cannot be resent
         mockMvc.perform(post("/api/notifications/admin/" + notification.getId() + "/resend")
                         .header(HttpHeaders.AUTHORIZATION, token(UUID.randomUUID(), "ROLE_ADMIN")))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.body").doesNotExist());
-        verify(mailSender, times(2)).send(mail.capture());
-        assertThat(mail.getValue().getText()).contains("reset-password?token=reset-token_123");
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
+        verify(mailSender, times(1)).send(any(SimpleMailMessage.class));
     }
 
     @Test
@@ -172,7 +188,8 @@ class NotificationIntegrationTest {
 
         rabbitTemplate.convertAndSend(MessagingConstants.ORDER_EXCHANGE, MessagingConstants.ORDER_CONFIRMED_KEY,
                 new OrderConfirmedEvent(UUID.randomUUID(), Instant.now(), UUID.randomUUID(), "ORD-20261021-ABCDEF",
-                        userId, "ivan.petrov@example.ru", new BigDecimal("25140000"), "RUB"));
+                        userId, "ivan.petrov@example.ru", new BigDecimal("25140000"), "RUB",
+                        "ONLINE"));
 
         Notification failed = await(() -> notificationRepository.findAll().stream()
                 .filter(n -> userId.equals(n.getUserId()) && n.getStatus() == NotificationStatus.FAILED).findFirst());
@@ -206,6 +223,111 @@ class NotificationIntegrationTest {
                         .header(HttpHeaders.AUTHORIZATION, token(UUID.randomUUID(), "ROLE_ADMIN")))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Уведомление не найдено"));
+    }
+
+    @Test
+    void concurrentRetriesSendAFailedEmailOnlyOnce() throws Exception {
+        String recipient = "concurrent." + UUID.randomUUID() + "@example.ru";
+        AtomicInteger sends = new AtomicInteger();
+        doAnswer(invocation -> {
+            SimpleMailMessage message = invocation.getArgument(0);
+            if (List.of(message.getTo()).contains(recipient)) {
+                sends.incrementAndGet();
+                // A slow SMTP server leaves time for the other run to pick the same row
+                Thread.sleep(500);
+            }
+            return null;
+        }).when(mailSender).send(any(SimpleMailMessage.class));
+        UUID id = save(recipient, NotificationStatus.FAILED, 1);
+
+        CyclicBarrier start = new CyclicBarrier(2);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<Integer>> runs = new ArrayList<>();
+            for (int i = 0; i < 2; i++) {
+                runs.add(executor.submit(() -> {
+                    start.await();
+                    return notificationService.retryUndelivered();
+                }));
+            }
+            for (Future<Integer> run : runs) {
+                run.get(30, TimeUnit.SECONDS);
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertThat(sends.get()).isEqualTo(1);
+        Notification sent = notificationRepository.findById(id).orElseThrow();
+        assertThat(sent.getStatus()).isEqualTo(NotificationStatus.SENT);
+        assertThat(sent.getAttempts()).isEqualTo(2);
+    }
+
+    @Test
+    void passwordResetLinkIsNotRetriedAfterItExpired() throws Exception {
+        doThrow(new MailSendException("Connection refused")).when(mailSender).send(any(SimpleMailMessage.class));
+        UUID userId = UUID.randomUUID();
+        Instant now = Instant.now();
+        rabbitTemplate.convertAndSend(MessagingConstants.USER_EXCHANGE,
+                MessagingConstants.USER_PASSWORD_RESET_REQUESTED_KEY,
+                new PasswordResetRequestedEvent(UUID.randomUUID(), now, userId, "ivan.petrov@example.ru",
+                        "short-lived-token", now.plus(Duration.ofSeconds(3))));
+        Notification failed = await(() -> notificationRepository.findAll().stream()
+                .filter(n -> userId.equals(n.getUserId()) && n.getStatus() == NotificationStatus.FAILED).findFirst());
+
+        Thread.sleep(Duration.between(Instant.now(), now.plus(Duration.ofSeconds(3))).toMillis() + 200);
+        doNothing().when(mailSender).send(any(SimpleMailMessage.class));
+        notificationService.retryUndelivered();
+
+        // The first (failed) attempt is the only one: the dead link is not sent
+        verify(mailSender, times(1)).send(any(SimpleMailMessage.class));
+        Notification expired = notificationRepository.findById(failed.getId()).orElseThrow();
+        assertThat(expired.getStatus()).isEqualTo(NotificationStatus.EXPIRED);
+        assertThat(expired.getBody()).isEqualTo(Notification.ERASED_BODY);
+        mockMvc.perform(post("/api/notifications/admin/" + failed.getId() + "/resend")
+                        .header(HttpHeaders.AUTHORIZATION, token(UUID.randomUUID(), "ROLE_ADMIN")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message")
+                        .value(startsWith("Письмо со ссылкой для сброса пароля нельзя отправить повторно")));
+        verify(mailSender, times(1)).send(any(SimpleMailMessage.class));
+    }
+
+    @Test
+    void anAttemptInterruptedByACrashIsRetried() throws Exception {
+        String recipient = "interrupted." + UUID.randomUUID() + "@example.ru";
+        UUID id = save(recipient, NotificationStatus.SENDING, 0);
+        jdbcTemplate.update("update notifications set updated_at = now() - interval '1 hour' where id = ?", id);
+
+        // A fresh SENDING row belongs to a live sender and cannot be resent meanwhile
+        UUID fresh = save("fresh." + UUID.randomUUID() + "@example.ru", NotificationStatus.SENDING, 0);
+        mockMvc.perform(post("/api/notifications/admin/" + fresh + "/resend")
+                        .header(HttpHeaders.AUTHORIZATION, token(UUID.randomUUID(), "ROLE_ADMIN")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("Письмо уже отправляется, повторите попытку позже"));
+
+        notificationService.retryUndelivered();
+
+        Notification delivered = notificationRepository.findById(id).orElseThrow();
+        assertThat(delivered.getStatus()).isEqualTo(NotificationStatus.SENT);
+        // The interrupted attempt counts
+        assertThat(delivered.getAttempts()).isEqualTo(2);
+        assertThat(notificationRepository.findById(fresh).orElseThrow().getStatus())
+                .isEqualTo(NotificationStatus.SENDING);
+        ArgumentCaptor<SimpleMailMessage> mail = ArgumentCaptor.forClass(SimpleMailMessage.class);
+        verify(mailSender, times(1)).send(mail.capture());
+        assertThat(mail.getValue().getTo()).containsExactly(recipient);
+    }
+
+    private UUID save(String recipient, NotificationStatus status, int attempts) {
+        Notification notification = new Notification();
+        notification.setEventId(UUID.randomUUID());
+        notification.setType(NotificationType.WELCOME);
+        notification.setRecipient(recipient);
+        notification.setSubject("Subject");
+        notification.setBody("Body");
+        notification.setStatus(status);
+        notification.setAttempts(attempts);
+        return notificationRepository.save(notification).getId();
     }
 
     private static <T> T await(Supplier<Optional<T>> probe) throws InterruptedException {

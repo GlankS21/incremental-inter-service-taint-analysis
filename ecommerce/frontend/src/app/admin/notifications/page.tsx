@@ -4,7 +4,7 @@ import { ResendButton } from "@/components/admin/ResendButton";
 import { Pagination, pageIndex } from "@/components/Pagination";
 import { PageTitle, StatusBadge } from "@/components/ui";
 import { formatDateTime, labelled, NOTIFICATION_STATUS_TONE, NOTIFICATION_TYPES } from "@/lib/format";
-import { apiGet, query } from "@/lib/server/data";
+import { apiGet, keepPageInRange, query } from "@/lib/server/data";
 import { oneOf, param, type SearchParams } from "@/lib/search-params";
 import type { Notification, NotificationStatus, NotificationType, PageResponse } from "@/lib/types";
 
@@ -26,6 +26,7 @@ export default async function AdminNotificationsPage({ searchParams }: { searchP
     getTranslations("notificationType"),
     getTranslations("notificationStatus"),
   ]);
+  keepPageInRange(page, notifications, "/admin/notifications", { status, type });
   const statuses = labelled(NOTIFICATION_STATUS_TONE, (value) => tStatus(value));
 
   return (

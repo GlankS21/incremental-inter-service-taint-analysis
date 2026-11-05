@@ -3,12 +3,14 @@ package com.shop.order.messaging.outbox;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shop.common.event.DomainEvent;
 import com.shop.common.util.CorrelationIdUtils;
+import com.shop.common.util.TextUtils;
 import com.shop.order.config.OrderProperties;
 import com.shop.order.entity.OutboxEvent;
 import com.shop.order.repository.OutboxEventRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.support.converter.MessageConversionException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,8 +40,10 @@ public class OutboxPublisher {
     private final Clock clock;
 
     /**
-     * @return number of events published. Stops at the first failure so that a broker outage does
-     * not burn through the whole batch; the failed row is retried on the next run, keeping order.
+     * @return number of events published. Stops at the first broker failure so that an outage does not
+     * burn through the whole batch; the failed row is retried on the next run, keeping order. A row that
+     * can never be published (unknown event type, payload that no longer matches the record) is parked
+     * instead, so that it does not block every event queued after it.
      */
     @Transactional
     public int publishPending() {
@@ -51,6 +55,12 @@ public class OutboxPublisher {
                 event.setPublishedAt(clock.instant());
                 event.setLastError(null);
                 published++;
+            } catch (UnpublishableEventException ex) {
+                event.setAttempts(event.getAttempts() + 1);
+                event.setFailedAt(clock.instant());
+                event.setLastError(truncate(ex.getMessage()));
+                log.error("Parked outbox event {} ({}) that can never be published",
+                        event.getId(), event.getRoutingKey(), ex);
             } catch (RuntimeException ex) {
                 event.setAttempts(event.getAttempts() + 1);
                 event.setLastError(truncate(ex.getClass().getSimpleName() + ": " + ex.getMessage()));
@@ -74,11 +84,15 @@ public class OutboxPublisher {
         CorrelationIdUtils.bind(outboxEvent.getCorrelationId() != null
                 ? outboxEvent.getCorrelationId() : CorrelationIdUtils.generate());
         try {
-            rabbitTemplate.invoke(operations -> {
-                operations.convertAndSend(outboxEvent.getExchange(), outboxEvent.getRoutingKey(), event);
-                operations.waitForConfirmsOrDie(CONFIRM_TIMEOUT_MS);
-                return null;
-            });
+            try {
+                rabbitTemplate.invoke(operations -> {
+                    operations.convertAndSend(outboxEvent.getExchange(), outboxEvent.getRoutingKey(), event);
+                    operations.waitForConfirmsOrDie(CONFIRM_TIMEOUT_MS);
+                    return null;
+                });
+            } catch (MessageConversionException ex) {
+                throw new UnpublishableEventException("Cannot convert outbox event " + outboxEvent.getId(), ex);
+            }
             log.info("Published {} (event {}) for {}", outboxEvent.getRoutingKey(), outboxEvent.getId(),
                     outboxEvent.getAggregateId());
         } finally {
@@ -93,17 +107,26 @@ public class OutboxPublisher {
     private DomainEvent deserialize(OutboxEvent outboxEvent) {
         String type = outboxEvent.getEventType();
         if (!type.startsWith(EVENT_PACKAGE)) {
-            throw new IllegalStateException("Refusing to deserialise untrusted event type " + type);
+            throw new UnpublishableEventException("Refusing to deserialise untrusted event type " + type, null);
         }
         try {
             Class<?> eventClass = Class.forName(type);
             return (DomainEvent) objectMapper.readValue(outboxEvent.getPayload(), eventClass);
-        } catch (ReflectiveOperationException | IOException ex) {
-            throw new IllegalStateException("Cannot deserialise outbox event " + outboxEvent.getId(), ex);
+        } catch (ReflectiveOperationException | IOException | ClassCastException ex) {
+            throw new UnpublishableEventException("Cannot deserialise outbox event " + outboxEvent.getId()
+                    + " of type " + type, ex);
         }
     }
 
     private static String truncate(String message) {
-        return message.length() <= MAX_ERROR_LENGTH ? message : message.substring(0, MAX_ERROR_LENGTH);
+        return TextUtils.truncate(message, MAX_ERROR_LENGTH);
+    }
+
+    /** The row itself is broken: publishing it again can never succeed. */
+    static final class UnpublishableEventException extends RuntimeException {
+
+        UnpublishableEventException(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 }

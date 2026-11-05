@@ -5,6 +5,7 @@ import com.shop.common.exception.ResourceNotFoundException;
 import com.shop.user.dto.request.AddressRequest;
 import com.shop.user.dto.response.AddressResponse;
 import com.shop.user.entity.Address;
+import com.shop.user.entity.UserProfile;
 import com.shop.user.mapper.AddressMapper;
 import com.shop.user.repository.AddressRepository;
 import com.shop.user.repository.UserProfileRepository;
@@ -46,6 +47,7 @@ public class AddressServiceImpl implements AddressService {
     @Transactional
     public AddressResponse createAddress(UUID userId, String email, AddressRequest request) {
         userProfileService.getOrCreateProfile(userId, email);
+        UserProfile user = lockAddressBook(userId);
         long existing = addressRepository.countByUserId(userId);
         if (existing >= MAX_ADDRESSES_PER_USER) {
             throw new BusinessException(ADDRESS_LIMIT_REACHED, MAX_ADDRESSES_PER_USER,
@@ -53,7 +55,7 @@ public class AddressServiceImpl implements AddressService {
         }
 
         Address address = addressMapper.toEntity(request);
-        address.setUser(userProfileRepository.getReferenceById(userId));
+        address.setUser(user);
         boolean makeDefault = existing == 0 || Boolean.TRUE.equals(request.defaultAddress());
         if (makeDefault && existing > 0) {
             addressRepository.clearDefaultForUser(userId);
@@ -65,6 +67,7 @@ public class AddressServiceImpl implements AddressService {
     @Override
     @Transactional
     public AddressResponse updateAddress(UUID userId, UUID addressId, AddressRequest request) {
+        lockAddressBook(userId);
         Address address = findOwned(userId, addressId);
         addressMapper.updateFromRequest(request, address);
         // Un-setting the default is done by choosing another default address, never implicitly.
@@ -78,6 +81,7 @@ public class AddressServiceImpl implements AddressService {
     @Override
     @Transactional
     public void deleteAddress(UUID userId, UUID addressId) {
+        lockAddressBook(userId);
         Address address = findOwned(userId, addressId);
         boolean wasDefault = address.isDefaultAddress();
         addressRepository.delete(address);
@@ -93,12 +97,23 @@ public class AddressServiceImpl implements AddressService {
     @Override
     @Transactional
     public AddressResponse setDefaultAddress(UUID userId, UUID addressId) {
+        lockAddressBook(userId);
         Address address = findOwned(userId, addressId);
         if (!address.isDefaultAddress()) {
             addressRepository.clearDefaultForUser(userId);
             address.setDefaultAddress(true);
         }
         return addressMapper.toResponse(addressRepository.saveAndFlush(address));
+    }
+
+    /**
+     * Serializes the changes of one address book on the profile row, so that concurrent requests of the
+     * same user see each other's addresses (address limit, default address). A user without profile has
+     * no addresses.
+     */
+    private UserProfile lockAddressBook(UUID userId) {
+        return userProfileRepository.findForUpdateById(userId)
+                .orElseThrow(() -> ResourceNotFoundException.of(ADDRESS_NOT_FOUND));
     }
 
     private Address findOwned(UUID userId, UUID addressId) {

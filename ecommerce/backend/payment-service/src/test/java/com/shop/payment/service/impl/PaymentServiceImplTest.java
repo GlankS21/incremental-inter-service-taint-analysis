@@ -361,8 +361,13 @@ class PaymentServiceImplTest {
         deliver("payment.succeeded", "yk-1");
 
         verify(paymentGateway).createRefund(any());
-        assertThat(payment().getStatus()).isEqualTo(PaymentStatus.CANCELLED);
         verify(outboxService, never()).enqueue(any(), eq(MessagingConstants.PAYMENT_SUCCEEDED_KEY), any(), any());
+        // The customer was charged: order-service is told that the money went back
+        assertThat(payment().getStatus()).isEqualTo(PaymentStatus.REFUNDED);
+        assertThat(payment().getTransactionId()).isEqualTo("yk-1");
+        PaymentRefundedEvent event = captured(MessagingConstants.PAYMENT_REFUNDED_KEY, PaymentRefundedEvent.class);
+        assertThat(event.refundId()).isEqualTo("rf-1");
+        assertThat(event.amount()).isEqualByComparingTo(AMOUNT);
     }
 
     @Test

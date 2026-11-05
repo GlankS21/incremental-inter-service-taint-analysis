@@ -15,6 +15,7 @@ import com.shop.inventory.entity.InventoryItem;
 import com.shop.inventory.entity.MovementType;
 import com.shop.inventory.entity.StockMovement;
 import com.shop.inventory.mapper.InventoryMapper;
+import com.shop.inventory.messaging.outbox.StockLevelNotifier;
 import com.shop.inventory.repository.InventoryItemRepository;
 import com.shop.inventory.repository.StockMovementRepository;
 import com.shop.inventory.service.InventoryService;
@@ -44,6 +45,7 @@ public class InventoryServiceImpl implements InventoryService {
     private final InventoryMapper inventoryMapper;
     private final InventoryProperties properties;
     private final MessageSource messageSource;
+    private final StockLevelNotifier stockLevelNotifier;
 
     @Override
     @Transactional(readOnly = true)
@@ -89,14 +91,16 @@ public class InventoryServiceImpl implements InventoryService {
             throw new BadRequestException("inventory.error.zero-change");
         }
         InventoryItem item = findForUpdateOrNew(productId);
+        int previousAvailable = item.availableQuantity();
         item.adjust(change);
-        return save(item, change, request.reason(), actorId);
+        return save(item, previousAvailable, change, request.reason(), actorId);
     }
 
     @Override
     @Transactional
     public InventoryItemResponse setStock(Long productId, SetStockRequest request, UUID actorId) {
         InventoryItem item = findForUpdateOrNew(productId);
+        int previousAvailable = item.availableQuantity();
         int change = request.quantityOnHand() - item.getQuantityOnHand();
         item.adjust(change);
         if (request.lowStockThreshold() != null) {
@@ -105,7 +109,7 @@ public class InventoryServiceImpl implements InventoryService {
         String reason = request.reason() != null ? request.reason()
                 : messageSource.getMessage("inventory.movement.stock-count", null,
                 CommonMessagesAutoConfiguration.DEFAULT_LOCALE);
-        return save(item, change, reason, actorId);
+        return save(item, previousAvailable, change, reason, actorId);
     }
 
     @Override
@@ -151,8 +155,10 @@ public class InventoryServiceImpl implements InventoryService {
                 .build();
     }
 
-    private InventoryItemResponse save(InventoryItem item, int onHandChange, String reason, UUID actorId) {
+    private InventoryItemResponse save(InventoryItem item, int previousAvailable, int onHandChange, String reason,
+                                       UUID actorId) {
         InventoryItem saved = inventoryItemRepository.saveAndFlush(item);
+        stockLevelNotifier.stockChanged(saved, previousAvailable);
         if (onHandChange != 0) {
             stockMovementRepository.save(StockMovement.of(saved, MovementType.ADJUSTMENT, onHandChange, 0,
                     null, reason, actorId));

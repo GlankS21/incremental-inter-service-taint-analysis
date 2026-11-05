@@ -39,6 +39,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -222,6 +223,36 @@ class OrderServiceImplTest {
     }
 
     @Test
+    void quantitiesThatOverflowWhenMergedAreRefused() {
+        // 2147483647 + 2147483647 wraps around to -2, which used to pass the per-product limit
+        assertThatThrownBy(() -> service.previewCoupon(customer, new CouponPreviewRequest("sale",
+                List.of(line(1L, Integer.MAX_VALUE), line(1L, Integer.MAX_VALUE)))))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("order.error.too-many-units");
+        assertThatThrownBy(() -> service.placeOrder(customer,
+                request(line(1L, Integer.MAX_VALUE), line(1L, Integer.MAX_VALUE), line(1L, 3)), null))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("order.error.too-many-units");
+        verifyNoInteractions(productClient, couponLedger);
+    }
+
+    @Test
+    void placeOrder_returnsTheOrderOfAConcurrentRetryWithTheSameIdempotencyKey() {
+        // Both requests missed the lookup; the other one committed first and this insert hits the unique key
+        Order winner = order(OrderStatus.PENDING, customer.id());
+        when(orderRepository.findByUserIdAndIdempotencyKey(customer.id(), "checkout-123"))
+                .thenReturn(Optional.empty(), Optional.of(winner));
+        when(productClient.getProductsByIds(anyList())).thenReturn(ApiResponse.success(List.of(product(1L, "1000"))));
+        when(orderRepository.save(any(Order.class)))
+                .thenThrow(new DataIntegrityViolationException("uk_orders_user_idempotency_key"));
+
+        OrderPlacement placement = service.placeOrder(customer, request(line(1L, 1)), "checkout-123");
+
+        assertThat(placement.created()).isFalse();
+        assertThat(placement.order().id()).isEqualTo(winner.getId());
+    }
+
+    @Test
     void placeOrder_returnsThePreviousOrderForARepeatedIdempotencyKey() {
         Order previous = order(OrderStatus.AWAITING_PAYMENT, customer.id());
         when(orderRepository.findByUserIdAndIdempotencyKey(customer.id(), "checkout-123"))
@@ -323,6 +354,7 @@ class OrderServiceImplTest {
                 eq(MessagingConstants.ORDER_DELIVERED_KEY), event.capture(), eq(order.getId()));
         assertThat(event.getValue().orderId()).isEqualTo(order.getId());
         assertThat(event.getValue().userId()).isEqualTo(customer.id());
+        assertThat(event.getValue().userEmail()).isEqualTo(order.getUserEmail());
         assertThat(event.getValue().items()).singleElement().satisfies(payload -> {
             assertThat(payload.productId()).isEqualTo(7L);
             assertThat(payload.quantity()).isEqualTo(2);

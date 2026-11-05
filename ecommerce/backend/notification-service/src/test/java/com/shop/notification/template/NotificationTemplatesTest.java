@@ -122,12 +122,34 @@ class NotificationTemplatesTest {
     void confirmsThePayment() {
         RenderedNotification mail = templates.orderConfirmed(new OrderConfirmedEvent(UUID.randomUUID(), ORDERED_AT,
                 UUID.randomUUID(), "ORD-1", UUID.randomUUID(), "ivan.petrov@example.ru", new BigDecimal("1234.5"),
-                "RUB"));
+                "RUB", "ONLINE"));
 
         assertThat(mail.type()).isEqualTo(NotificationType.ORDER_CONFIRMED);
         assertThat(mail.subject()).isEqualTo("[TechShop] Заказ ORD-1 оплачен и подтверждён");
         assertThat(mail.body()).contains("Оплата заказа ORD-1 на сумму 1" + NBSP + "234,50" + NBSP
                 + "₽ прошла успешно (21.10.2026 13:05).");
+    }
+
+    @Test
+    void confirmsACashOnDeliveryOrderWithoutClaimingItWasPaid() {
+        RenderedNotification mail = templates.orderConfirmed(new OrderConfirmedEvent(UUID.randomUUID(), ORDERED_AT,
+                UUID.randomUUID(), "ORD-1", UUID.randomUUID(), "ivan.petrov@example.ru", new BigDecimal("1234.5"),
+                "RUB", "COD"));
+
+        assertThat(mail.type()).isEqualTo(NotificationType.ORDER_CONFIRMED);
+        assertThat(mail.subject()).isEqualTo("[TechShop] Заказ ORD-1 подтверждён");
+        assertThat(mail.body())
+                .contains("Заказ ORD-1 на сумму 1" + NBSP + "234,50" + NBSP + "₽ подтверждён (21.10.2026 13:05).")
+                .contains("Оплата при получении")
+                .doesNotContain("прошла успешно");
+    }
+
+    @Test
+    void confirmsAnOrderFromAnEventWithoutPaymentMethodAsPaid() {
+        RenderedNotification mail = templates.orderConfirmed(new OrderConfirmedEvent(UUID.randomUUID(), ORDERED_AT,
+                UUID.randomUUID(), "ORD-1", UUID.randomUUID(), "ivan.petrov@example.ru", BigDecimal.TEN, "RUB", null));
+
+        assertThat(mail.subject()).isEqualTo("[TechShop] Заказ ORD-1 оплачен и подтверждён");
     }
 
     @Test
