@@ -17,6 +17,7 @@ import com.shop.auth.security.IssuedTokens;
 import com.shop.auth.service.AuthService;
 import com.shop.auth.service.TokenService;
 import com.shop.auth.util.EmailUtils;
+import com.shop.auth.util.PasswordPolicy;
 import com.shop.common.event.UserRegisteredEvent;
 import com.shop.common.exception.BadRequestException;
 import com.shop.common.exception.ConflictException;
@@ -114,7 +115,8 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponse login(LoginRequest request) {
         UserAccount account = userAccountRepository.findByEmail(EmailUtils.normalize(request.email()))
                 .orElse(null);
-        if (account == null) {
+        // bcrypt compares only the first 72 bytes, so a longer input must not reach the real hash.
+        if (account == null || !PasswordPolicy.fitsBcrypt(request.password())) {
             passwordEncoder.matches(request.password(), dummyPasswordHash);
             throw new UnauthorizedException(INVALID_CREDENTIALS);
         }
@@ -156,7 +158,8 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public void changePassword(UUID accountId, ChangePasswordRequest request) {
         UserAccount account = findAccount(accountId);
-        if (!passwordEncoder.matches(request.currentPassword(), account.getPasswordHash())) {
+        if (!PasswordPolicy.fitsBcrypt(request.currentPassword())
+                || !passwordEncoder.matches(request.currentPassword(), account.getPasswordHash())) {
             throw new BadRequestException(CURRENT_PASSWORD_INCORRECT);
         }
         if (request.currentPassword().equals(request.newPassword())) {

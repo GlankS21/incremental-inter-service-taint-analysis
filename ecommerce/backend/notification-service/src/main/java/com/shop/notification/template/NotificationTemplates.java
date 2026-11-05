@@ -3,8 +3,10 @@ package com.shop.notification.template;
 import com.shop.common.event.OrderCancelledEvent;
 import com.shop.common.event.OrderConfirmedEvent;
 import com.shop.common.event.OrderCreatedEvent;
+import com.shop.common.event.OrderDeliveredEvent;
 import com.shop.common.event.OrderItemPayload;
 import com.shop.common.event.PasswordResetRequestedEvent;
+import com.shop.common.event.ReviewReminderDueEvent;
 import com.shop.common.event.UserRegisteredEvent;
 import com.shop.notification.config.NotificationProperties;
 import com.shop.notification.entity.NotificationType;
@@ -19,6 +21,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -33,6 +37,8 @@ public class NotificationTemplates {
     static final ZoneId SHOP_ZONE = ZoneId.of("Europe/Moscow");
     private static final DateTimeFormatter DATE_TIME =
             DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm").withZone(SHOP_ZONE);
+    /** {@code PaymentMethod.COD} of order-service, as carried by {@link OrderConfirmedEvent#paymentMethod()}. */
+    private static final String CASH_ON_DELIVERY = "COD";
 
     private final NotificationProperties properties;
 
@@ -71,7 +77,7 @@ public class NotificationTemplates {
 
                 %s""".formatted(event.email(), shop(), link, validityMinutes(event), signature());
         return new RenderedNotification(NotificationType.PASSWORD_RESET, event.userId(), event.email(), null,
-                "[%s] Сброс пароля".formatted(shop()), body);
+                "[%s] Сброс пароля".formatted(shop()), body, event.expiresAt());
     }
 
     public RenderedNotification orderPlaced(OrderCreatedEvent event) {
@@ -98,7 +104,24 @@ public class NotificationTemplates {
                 event.orderNumber(), "[%s] Заказ %s оформлен".formatted(shop(), event.orderNumber()), body);
     }
 
+    /**
+     * A cash-on-delivery order is confirmed as soon as the stock is reserved: the customer pays the courier,
+     * so the mail must not say the payment went through.
+     */
     public RenderedNotification orderConfirmed(OrderConfirmedEvent event) {
+        if (CASH_ON_DELIVERY.equals(event.paymentMethod())) {
+            String body = """
+                    Здравствуйте!
+
+                    Заказ %s на сумму %s подтверждён (%s).
+                    Оплата при получении: вы рассчитаетесь с курьером, когда получите заказ.
+                    Скоро мы передадим его в доставку.
+
+                    %s""".formatted(event.orderNumber(), MoneyFormatter.format(event.totalAmount(), event.currency()),
+                    dateTime(event.occurredAt()), signature());
+            return new RenderedNotification(NotificationType.ORDER_CONFIRMED, event.userId(), event.userEmail(),
+                    event.orderNumber(), "[%s] Заказ %s подтверждён".formatted(shop(), event.orderNumber()), body);
+        }
         String body = """
                 Здравствуйте!
 
@@ -128,6 +151,63 @@ public class NotificationTemplates {
     }
 
     /**
+     * «Оцените покупку»: shown in the account only (in-app), right after delivery. The products are counted
+     * once each, whatever their quantity.
+     */
+    public RenderedNotification reviewRequest(OrderDeliveredEvent event) {
+        List<String> names = event.items() == null ? List.of() : event.items().stream()
+                .filter(Objects::nonNull)
+                .map(OrderItemPayload::productName)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .toList();
+        String lines = names.stream().map(name -> "  - " + name).collect(Collectors.joining("\n"));
+        String body = """
+                Заказ %s доставлен (%s). Спасибо за покупку!
+
+                Поделитесь впечатлением о %s — ваш отзыв поможет другим покупателям:
+
+                %s
+
+                Оставить отзыв: %s""".formatted(event.orderNumber(), dateTime(event.occurredAt()),
+                RussianPlural.withCount(names.size(), "товаре", "товарах", "товарах"), lines, reviewsLink());
+        return new RenderedNotification(NotificationType.REVIEW_REQUEST, event.userId(), event.userEmail(),
+                event.orderNumber(), "Оцените покупку", body);
+    }
+
+    /**
+     * One e-mail per delivered order: each product links to its review form on the "Мои отзывы" page.
+     *
+     * @param recipient the customer's address (the reminder event carries no personal data)
+     */
+    public RenderedNotification reviewReminder(ReviewReminderDueEvent event, String recipient) {
+        String lines = event.items().stream()
+                .map(item -> "  - %s\n    %s?product=%d".formatted(item.productName(), reviewsLink(), item.productId()))
+                .collect(Collectors.joining("\n"));
+        String order = StringUtils.hasText(event.orderNumber()) ? " " + event.orderNumber() : "";
+        String body = """
+                Здравствуйте!
+
+                Недавно мы доставили ваш заказ%s. Вы ещё не оценили %s:
+
+                %s
+
+                Оценка займёт минуту: выберите звёзды и, если хотите, напишите пару слов.
+                Все товары, ожидающие отзыва: %s
+
+                Это единственное напоминание по этому заказу. Отключить напоминания об отзывах можно в разделе «Уведомления»: %s/account/notifications
+
+                %s""".formatted(order, RussianPlural.withCount(event.items().size(), "товар", "товара", "товаров"),
+                lines, reviewsLink(), properties.frontendUrl(), signature());
+        return new RenderedNotification(NotificationType.REVIEW_REMINDER, event.userId(), recipient,
+                event.orderNumber(), "[%s] Оцените покупку".formatted(shop()), body);
+    }
+
+    private String reviewsLink() {
+        return properties.frontendUrl() + "/account/reviews";
+    }
+
+    /**
      * @return {@code dd.MM.yyyy HH:mm} in Moscow time
      */
     static String dateTime(Instant instant) {
@@ -153,8 +233,14 @@ public class NotificationTemplates {
 
     /**
      * @param reference order number of order notifications
+     * @param expiresAt end of validity of the link in the body; the e-mail is not sent afterwards
      */
     public record RenderedNotification(NotificationType type, UUID userId, String recipient, String reference,
-                                       String subject, String body) {
+                                       String subject, String body, Instant expiresAt) {
+
+        public RenderedNotification(NotificationType type, UUID userId, String recipient, String reference,
+                                    String subject, String body) {
+            this(type, userId, recipient, reference, subject, body, null);
+        }
     }
 }

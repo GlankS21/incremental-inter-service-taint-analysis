@@ -30,6 +30,7 @@ import com.shop.order.service.OrderService;
 import com.shop.order.util.OrderNumberGenerator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -101,14 +102,29 @@ public class OrderServiceImpl implements OrderService {
         order.price(priced.subtotal(), properties.shipping().feeFor(priced.subtotal()));
         order.setCurrency(priced.currency());
 
-        OrderResponse placed = transactionTemplate.execute(status -> {
-            Optional<Coupon> coupon = couponLedger.lockApplicable(request.couponCode(), customer.id(),
-                    order.getSubtotal());
-            coupon.ifPresent(applied -> order.applyCoupon(applied.getCode(), applied.discountFor(order.getSubtotal())));
-            Order saved = orderLifecycle.place(order);
-            coupon.ifPresent(applied -> couponLedger.redeem(applied, saved));
-            return orderMapper.toResponse(saved);
-        });
+        OrderResponse placed;
+        try {
+            placed = transactionTemplate.execute(status -> {
+                Optional<Coupon> coupon = couponLedger.lockApplicable(request.couponCode(), customer.id(),
+                        order.getSubtotal());
+                coupon.ifPresent(applied -> order.applyCoupon(applied.getCode(),
+                        applied.discountFor(order.getSubtotal())));
+                Order saved = orderLifecycle.place(order);
+                coupon.ifPresent(applied -> couponLedger.redeem(applied, saved));
+                return orderMapper.toResponse(saved);
+            });
+        } catch (DataIntegrityViolationException ex) {
+            // A concurrent retry with the same key committed between the lookup above and this insert
+            Optional<OrderResponse> concurrent = key == null ? Optional.empty() : transactionTemplate.execute(
+                    status -> orderRepository.findByUserIdAndIdempotencyKey(customer.id(), key)
+                            .map(orderMapper::toResponse));
+            if (concurrent.isEmpty()) {
+                throw ex;
+            }
+            log.info("Concurrent checkout with idempotency key {}, returning order {}", key,
+                    concurrent.get().orderNumber());
+            return new OrderPlacement(concurrent.get(), false);
+        }
         log.info("Order {} placed by {}: {} product(s), total {} {}", placed.orderNumber(), customer.id(),
                 priced.items().size(), placed.totalAmount(), placed.currency());
         return new OrderPlacement(placed, true);
@@ -224,7 +240,9 @@ public class OrderServiceImpl implements OrderService {
      */
     private Map<Long, Integer> mergeQuantities(List<OrderItemRequest> items) {
         Map<Long, Integer> quantities = new LinkedHashMap<>();
-        items.forEach(item -> quantities.merge(item.productId(), item.quantity(), Integer::sum));
+        // Saturating sum: an int overflow would wrap around to a negative quantity and pass the limit below
+        items.forEach(item -> quantities.merge(item.productId(), item.quantity(),
+                (a, b) -> (int) Math.min((long) a + b, Integer.MAX_VALUE)));
         if (quantities.size() > properties.maxItems()) {
             throw new BadRequestException("order.error.too-many-products", properties.maxItems());
         }

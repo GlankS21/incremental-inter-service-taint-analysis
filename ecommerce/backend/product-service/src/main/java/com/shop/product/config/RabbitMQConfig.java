@@ -12,7 +12,8 @@ import org.springframework.context.annotation.Configuration;
 
 /**
  * product-service publishes {@code product.created} on the product exchange (inventory-service declares
- * its own queue) and consumes {@code order.delivered} to learn who may review a product.
+ * its own queue), consumes {@code order.delivered} to learn who may review a product (and count its sales)
+ * and {@code stock.level-changed} to know which products are in stock.
  */
 @Configuration
 public class RabbitMQConfig {
@@ -28,6 +29,11 @@ public class RabbitMQConfig {
     }
 
     @Bean
+    public TopicExchange inventoryExchange() {
+        return RabbitTopology.topicExchange(MessagingConstants.INVENTORY_EXCHANGE);
+    }
+
+    @Bean
     public DirectExchange deadLetterExchange() {
         return RabbitTopology.deadLetterExchange();
     }
@@ -36,6 +42,12 @@ public class RabbitMQConfig {
     public Declarables orderDeliveredQueue() {
         return consumerQueue(MessagingConstants.PRODUCT_ORDER_DELIVERED_QUEUE,
                 orderExchange(), MessagingConstants.ORDER_DELIVERED_KEY);
+    }
+
+    @Bean
+    public Declarables stockLevelChangedQueue() {
+        return consumerQueue(MessagingConstants.PRODUCT_STOCK_LEVEL_CHANGED_QUEUE,
+                inventoryExchange(), MessagingConstants.STOCK_LEVEL_CHANGED_KEY);
     }
 
     private Declarables consumerQueue(String name, TopicExchange exchange, String routingKey) {

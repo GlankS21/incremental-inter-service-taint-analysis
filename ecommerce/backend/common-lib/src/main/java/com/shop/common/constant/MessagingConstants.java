@@ -28,6 +28,7 @@ public final class MessagingConstants {
     public static final String STOCK_RESERVED_KEY = "stock.reserved";
     public static final String STOCK_RESERVATION_FAILED_KEY = "stock.reservation-failed";
     public static final String STOCK_RELEASED_KEY = "stock.released";
+    public static final String STOCK_LEVEL_CHANGED_KEY = "stock.level-changed";
 
     // Routing keys published by payment-service
     public static final String PAYMENT_SUCCEEDED_KEY = "payment.succeeded";
@@ -40,6 +41,7 @@ public final class MessagingConstants {
 
     // Routing keys published by product-service
     public static final String PRODUCT_CREATED_KEY = "product.created";
+    public static final String REVIEW_REMINDER_DUE_KEY = "review.reminder-due";
 
     // Queues consumed by inventory-service
     public static final String INVENTORY_ORDER_CREATED_QUEUE = "inventory.order-created";
@@ -63,6 +65,7 @@ public final class MessagingConstants {
 
     // Queues consumed by product-service
     public static final String PRODUCT_ORDER_DELIVERED_QUEUE = "product.order-delivered";
+    public static final String PRODUCT_STOCK_LEVEL_CHANGED_QUEUE = "product.stock-level-changed";
 
     // Queues consumed by user-service
     public static final String USER_USER_REGISTERED_QUEUE = "user.user-registered";
@@ -70,6 +73,7 @@ public final class MessagingConstants {
     // Queues consumed by notification-service (one queue per producing exchange, several event types)
     public static final String NOTIFICATION_ORDER_EVENTS_QUEUE = "notification.order-events";
     public static final String NOTIFICATION_USER_EVENTS_QUEUE = "notification.user-events";
+    public static final String NOTIFICATION_PRODUCT_EVENTS_QUEUE = "notification.product-events";
 
     public static final String DEAD_LETTER_SUFFIX = ".dlq";
 

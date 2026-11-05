@@ -2,11 +2,11 @@ import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
 import Link from "next/link";
 import { Pagination, pageIndex } from "@/components/Pagination";
-import { ButtonLink, EmptyState, PageTitle, StatusBadge, Thumb } from "@/components/ui";
+import { Badge, ButtonLink, EmptyState, PageTitle, StatusBadge, Thumb } from "@/components/ui";
 import { formatDateTime, formatMoney, labelled, ORDER_STATUS_TONE } from "@/lib/format";
-import { apiGet, query } from "@/lib/server/data";
+import { apiGet, keepPageInRange, query } from "@/lib/server/data";
 import { oneOf, param, type SearchParams } from "@/lib/search-params";
-import type { OrderStatus, OrderSummary, PageResponse } from "@/lib/types";
+import type { OrderStatus, OrderSummary, PageResponse, PendingReviewCount } from "@/lib/types";
 
 export async function generateMetadata(): Promise<Metadata> {
   return { title: (await getTranslations("orderList"))("title") };
@@ -25,6 +25,14 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     getTranslations("orderList"),
     getTranslations("orderStatus"),
   ]);
+  keepPageInRange(page, orders, "/orders", { status });
+  // Received products still to be rated, per delivered order of this page (at most 10 orders per call)
+  const delivered = orders.content.filter((order) => order.status === "DELIVERED").map((order) => order.id);
+  const toReview = delivered.length
+    ? await apiGet<PendingReviewCount>(`/api/reviews/pending/count${query({ orderIds: delivered.join(",") })}`, { auth: true })
+        .then((result) => result.byOrder)
+        .catch(() => ({}) as Record<string, number>)
+    : {};
   const orderStatus = labelled(ORDER_STATUS_TONE, (value) => tStatus(value));
 
   const tabClass = (active: boolean) =>
@@ -58,6 +66,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-medium text-slate-900">{order.orderNumber}</span>
                     <StatusBadge value={order.status} labels={orderStatus} />
+                    {(toReview[order.id] ?? 0) > 0 && <Badge tone="warning">{t("rateItems", { count: toReview[order.id] })}</Badge>}
                   </div>
                   <p className="mt-1 truncate text-sm text-slate-600">
                     {order.firstItemName}

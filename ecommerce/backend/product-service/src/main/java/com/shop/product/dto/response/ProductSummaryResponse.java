@@ -6,6 +6,8 @@ import java.math.BigDecimal;
 
 /**
  * Product card used in listings and by other services (cart, order) to read current prices.
+ * {@code inStock} follows the stock reported by inventory-service; {@code salesCount} is the number of
+ * delivered orders containing the product (popularity).
  */
 public record ProductSummaryResponse(
         Long id,
@@ -22,6 +24,8 @@ public record ProductSummaryResponse(
         String categoryName,
         ProductStatus status,
         BigDecimal ratingAverage,
-        int ratingCount
+        int ratingCount,
+        boolean inStock,
+        int salesCount
 ) {
 }

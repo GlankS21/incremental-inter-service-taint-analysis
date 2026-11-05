@@ -20,8 +20,14 @@ public interface ProductService {
 
     int SLUG_MAX_LENGTH = 220;
     int MAX_BATCH_SIZE = 100;
-    Set<String> SORTABLE_PROPERTIES = Set.of("price", "name", "createdAt", "updatedAt", "sku", "ratingAverage");
+    Set<String> SORTABLE_PROPERTIES = Set.of("price", "name", "createdAt", "updatedAt", "sku", "ratingAverage",
+            "salesCount");
 
+    /**
+     * Catalogue browsing with the filters of the criteria; its keyword is not used (keyword searches go
+     * through {@code ProductSearchService}). Products tied on the requested order are ordered by id, newest
+     * first.
+     */
     PageResponse<ProductSummaryResponse> searchProducts(ProductSearchCriteria criteria, Pageable pageable,
                                                         boolean includeHidden);
 

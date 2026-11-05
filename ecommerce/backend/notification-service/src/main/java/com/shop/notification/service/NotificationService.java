@@ -7,6 +7,7 @@ import com.shop.notification.entity.NotificationType;
 import com.shop.notification.template.NotificationTemplates.RenderedNotification;
 import org.springframework.data.domain.Pageable;
 
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -16,7 +17,8 @@ import java.util.UUID;
 public interface NotificationService {
 
     /**
-     * Saves the e-mail of an event and sends it. An event already handled (same event id) is ignored.
+     * Saves the notification of an event and sends it by e-mail, or only records it when it is an in-app
+     * notification. An event already handled (same event id) is ignored.
      */
     void notify(UUID eventId, RenderedNotification notification);
 
@@ -27,10 +29,17 @@ public interface NotificationService {
 
     PageResponse<NotificationResponse> listOf(UUID userId, Pageable pageable);
 
+    /**
+     * The address of the latest notification of the customer that has one: notification-service keeps no
+     * other copy of customer addresses, and events such as {@code review.reminder-due} carry none.
+     */
+    Optional<String> findLatestAddress(UUID userId);
+
     PageResponse<NotificationResponse> search(NotificationStatus status, NotificationType type, Pageable pageable);
 
     /**
-     * Sends the e-mail again, whatever its status and number of attempts.
+     * Sends the e-mail again, whatever its number of attempts. Refused while another attempt is in
+     * progress, and for a confidential e-mail (password reset link) that was already sent or has expired.
      */
     NotificationResponse resend(UUID notificationId);
 }

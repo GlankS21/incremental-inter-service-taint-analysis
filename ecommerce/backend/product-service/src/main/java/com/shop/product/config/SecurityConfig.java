@@ -17,7 +17,8 @@ import org.springframework.security.web.SecurityFilterChain;
  * Catalogue browsing is public (an access token, when sent, is still verified and lets admins see
  * hidden products), including product reviews and uploaded images under {@code /api/products}; every
  * catalogue write requires {@code ROLE_ADMIN} via {@code @PreAuthorize}. Writing one's own review
- * ({@code /api/reviews/**}) requires any authenticated user, review moderation {@code ROLE_ADMIN}.
+ * ({@code /api/reviews/**}) requires any authenticated user, review moderation {@code ROLE_ADMIN}, as the
+ * search administration ({@code /api/search/admin/**}: statistics and synonyms).
  */
 @Configuration
 @EnableMethodSecurity

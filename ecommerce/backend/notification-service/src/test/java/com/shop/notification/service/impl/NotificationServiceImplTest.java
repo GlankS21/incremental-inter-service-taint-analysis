@@ -1,5 +1,7 @@
 package com.shop.notification.service.impl;
 
+import com.shop.common.exception.BadRequestException;
+import com.shop.common.exception.ConflictException;
 import com.shop.common.exception.ResourceNotFoundException;
 import com.shop.notification.config.NotificationProperties;
 import com.shop.notification.entity.Notification;
@@ -68,6 +70,7 @@ class NotificationServiceImplTest {
             entity.setId(saved.getId());
             return entity;
         });
+        when(notificationRepository.claim(saved.getId(), List.of(NotificationStatus.PENDING), NOW)).thenReturn(1);
         when(notificationRepository.findById(saved.getId())).thenReturn(Optional.of(saved));
 
         UUID eventId = UUID.randomUUID();
@@ -103,6 +106,8 @@ class NotificationServiceImplTest {
         when(notificationRepository.findById(notification.getId())).thenReturn(Optional.of(notification));
         when(notificationRepository.findIdsToRetry(eq(3), eq(NOW.minus(Duration.ofMinutes(2))), any(Pageable.class)))
                 .thenReturn(List.of(notification.getId()));
+        when(notificationRepository.claimForRetry(notification.getId(), 3, NOW.minus(Duration.ofMinutes(2)), NOW))
+                .thenReturn(1);
         doThrow(new MailSendException("Connection refused")).when(emailSender).send(anyString(), anyString(), anyString());
 
         assertThat(service.retryUndelivered()).isZero();
@@ -116,12 +121,90 @@ class NotificationServiceImplTest {
     void resend_deliversAFailedNotificationAgain() {
         Notification notification = stored(NotificationStatus.FAILED, 3);
         notification.setLastError("MailSendException: Connection refused");
-        when(notificationRepository.existsById(notification.getId())).thenReturn(true);
         when(notificationRepository.findById(notification.getId())).thenReturn(Optional.of(notification));
+        when(notificationRepository.claim(notification.getId(),
+                List.of(NotificationStatus.PENDING, NotificationStatus.FAILED, NotificationStatus.SENT), NOW))
+                .thenReturn(1);
 
         assertThat(service.resend(notification.getId()).status()).isEqualTo(NotificationStatus.SENT);
         assertThat(notification.getAttempts()).isEqualTo(4);
         assertThat(notification.getLastError()).isNull();
+    }
+
+    @Test
+    void resend_isRefusedWhileAnotherAttemptIsInProgress() {
+        Notification notification = stored(NotificationStatus.SENDING, 1);
+        when(notificationRepository.findById(notification.getId())).thenReturn(Optional.of(notification));
+
+        assertThatThrownBy(() -> service.resend(notification.getId())).isInstanceOf(ConflictException.class)
+                .hasMessage(NotificationServiceImpl.ALREADY_SENDING);
+        verifyNoInteractions(emailSender);
+    }
+
+    @Test
+    void resend_isRefusedForADeliveredPasswordResetLink() {
+        Notification notification = stored(NotificationStatus.SENT, 1);
+        notification.setType(NotificationType.PASSWORD_RESET);
+        when(notificationRepository.findById(notification.getId())).thenReturn(Optional.of(notification));
+
+        assertThatThrownBy(() -> service.resend(notification.getId())).isInstanceOf(BadRequestException.class)
+                .hasMessage(NotificationServiceImpl.NOT_RESENDABLE);
+        verify(notificationRepository).claim(notification.getId(),
+                List.of(NotificationStatus.PENDING, NotificationStatus.FAILED), NOW);
+        verifyNoInteractions(emailSender);
+    }
+
+    @Test
+    void retry_skipsARowClaimedByAnotherSender() {
+        UUID id = UUID.randomUUID();
+        when(notificationRepository.findIdsToRetry(eq(3), any(Instant.class), any(Pageable.class)))
+                .thenReturn(List.of(id));
+
+        assertThat(service.retryUndelivered()).isZero();
+
+        verify(notificationRepository, never()).findById(id);
+        verifyNoInteractions(emailSender);
+    }
+
+    @Test
+    void retry_marksAnExpiredLinkInsteadOfSendingIt() {
+        Notification notification = stored(NotificationStatus.FAILED, 1);
+        notification.setType(NotificationType.PASSWORD_RESET);
+        notification.setBody("https://shop.example.com/reset-password?token=secret");
+        notification.setExpiresAt(NOW);
+        when(notificationRepository.findIdsToRetry(eq(3), any(Instant.class), any(Pageable.class)))
+                .thenReturn(List.of(notification.getId()));
+        when(notificationRepository.claimForRetry(eq(notification.getId()), eq(3), any(Instant.class), eq(NOW)))
+                .thenReturn(1);
+        when(notificationRepository.findById(notification.getId())).thenReturn(Optional.of(notification));
+
+        assertThat(service.retryUndelivered()).isZero();
+
+        verifyNoInteractions(emailSender);
+        assertThat(notification.getStatus()).isEqualTo(NotificationStatus.EXPIRED);
+        assertThat(notification.getBody()).isEqualTo(Notification.ERASED_BODY);
+        assertThat(notification.getAttempts()).isEqualTo(1);
+    }
+
+    @Test
+    void retry_firstReleasesInterruptedAttemptsAndExpiresOverdueLinks() {
+        service.retryUndelivered();
+
+        verify(notificationRepository).releaseInterrupted(NOW.minus(NotificationServiceImpl.SENDING_TIMEOUT),
+                NotificationServiceImpl.INTERRUPTED_ERROR, NOW);
+        verify(notificationRepository).expireOverdue(List.of(NotificationType.PASSWORD_RESET),
+                Notification.ERASED_BODY, NOW);
+    }
+
+    @Test
+    void aSentPasswordResetLinkIsErased() {
+        Notification notification = stored(NotificationStatus.SENDING, 0);
+        notification.setType(NotificationType.PASSWORD_RESET);
+        notification.setBody("https://shop.example.com/reset-password?token=secret");
+
+        notification.markSent(NOW);
+
+        assertThat(notification.getBody()).isEqualTo(Notification.ERASED_BODY);
     }
 
     @Test

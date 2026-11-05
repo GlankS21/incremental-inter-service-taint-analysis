@@ -5,7 +5,7 @@
 | Уровень | Что проверяется | Инструменты | Нужен Docker |
 |---|---|---|---|
 | Unit | Бизнес-правила в сервисах и сущностях: расчёт цен корзины, переходы статусов заказа, резервирование/снятие резерва, эмулированная оплата, ротация токенов, шаблоны писем… | JUnit 5, Mockito, AssertJ | Нет |
-| Integration | Реальный сервис с настоящими PostgreSQL и RabbitMQ: API через MockMvc, безопасность JWT, миграции Flyway, консьюмеры и outbox Saga | Spring Boot Test, Testcontainers | Да (автоматически пропускаются без Docker) |
+| Integration | Реальный сервис с настоящими PostgreSQL и RabbitMQ: API через MockMvc, безопасность JWT, миграции Flyway, консьюмеры и outbox Saga, поиск по каталогу (морфология, опечатки, раскладка, синонимы, ранжирование, SQL-инъекции, фасеты, подсказки) | Spring Boot Test, Testcontainers | Да (автоматически пропускаются без Docker) |
 | Gateway | Маршрутизация, проверка JWT, rate limit, адрес клиента за доверенным прокси | WebTestClient, unit-тесты | Нет |
 | Frontend | Чтение JWT, определение IP клиента, single-flight обновление токена, защита от open redirect, форматирование денег/дат (RUB, ru-RU), параметры URL | Vitest | Нет |
 | End-to-end | Вся система в Docker через сайт: покупка с полным прохождением Saga, администрирование, CSRF, одновременное обновление токена, rate limit, Swagger | `scripts/smoke-test.sh` (curl) | Да |
@@ -16,26 +16,26 @@ smoke-тестом.
 
 ## Количество
 
-Результат `./mvnw clean verify` (21.10.2026, Docker запущен, ни один тест не пропущен). Покрытие взято из
+Результат `./mvnw verify` (27.10.2026, Docker запущен, ни один тест не пропущен). Покрытие взято из
 JaCoCo, учитываются только тесты самого модуля:
 
 | Модуль | Тесты | Покрытие строк | Покрытие ветвлений |
 |---|---:|---:|---:|
-| common-lib | 20 | 35% | 52% |
+| common-lib | 27 | 48% | 55% |
 | config-server | 3 | 100% | — |
 | discovery-server | 3 | 100% | — |
-| api-gateway | 15 | 77% | 54% |
-| auth-service | 35 | 88% | 86% |
-| user-service | 25 | 88% | 73% |
-| product-service | 32 | 87% | 71% |
-| inventory-service | 27 | 91% | 73% |
-| cart-service | 13 | 95% | 85% |
-| order-service | 20 | 92% | 76% |
-| payment-service | 13 | 92% | 72% |
-| notification-service | 12 | 92% | 67% |
-| **Backend** | **218** | | |
-| Frontend (Vitest) | 28 | | |
-| Smoke-тест | 64 шага | | |
+| api-gateway | 22 | 81% | 56% |
+| auth-service | 50 | 89% | 89% |
+| user-service | 59 | 91% | 81% |
+| product-service | 107 | 92% | 82% |
+| inventory-service | 33 | 93% | 76% |
+| cart-service | 51 | 95% | 87% |
+| order-service | 52 | 91% | 81% |
+| payment-service | 40 | 89% | 68% |
+| notification-service | 46 | 93% | 78% |
+| **Backend** | **493** | | |
+| Frontend (Vitest) | 74 | | |
+| Smoke-тест | 83 шага | | |
 
 Покрытие common-lib низкое, потому что большая часть его кода (auto-configuration, передача correlation id через
 Feign и RabbitMQ, общая обработка ошибок) выполняется только внутри сервисов и проверяется интеграционными
@@ -88,6 +88,10 @@ ADMIN_EMAIL=admin@shop.local ADMIN_PASSWORD='<ADMIN_PASSWORD>' scripts/smoke-tes
 5. Истёкший access token при 5 одновременных запросах: все успешны, выпущен только один новый refresh token,
    сеанс не отозван.
 6. Выход; rate limit блокирует один адрес, не затрагивая другие.
+
+После создания товара скрипт проверяет поиск: товар находится по SKU, событие `stock.level-changed` помечает его
+как имеющийся в наличии, подсказки исправляют раскладку (`ntcnjdst` → «тестовые»), администратору доступна статистика
+поиска и страницы `/admin/search`, `/admin/search/synonyms`.
 
 ## CI
 

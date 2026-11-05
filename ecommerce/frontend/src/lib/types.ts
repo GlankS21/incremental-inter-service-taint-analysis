@@ -121,6 +121,114 @@ export interface ProductSummary {
   /** 0 when the product has no review yet. */
   ratingAverage: number;
   ratingCount: number;
+  /** Available quantity > 0, synced from inventory-service. */
+  inStock: boolean;
+  /** Number of delivered orders containing the product. */
+  salesCount: number;
+}
+
+export interface CategoryCount {
+  id: number;
+  name: string;
+  slug: string;
+  count: number;
+}
+
+export interface BrandCount {
+  name: string;
+  count: number;
+}
+
+/** Fixed RUB bucket: `from` inclusive, `to` exclusive, null = open. */
+export interface PriceRangeCount {
+  from: number | null;
+  to: number | null;
+  count: number;
+}
+
+/**
+ * Counts of the matched products. Disjunctive: each facet ignores its own filter (the category facet
+ * ignores categoryId…), every other filter and the keyword apply.
+ */
+export interface SearchFacets {
+  categories: CategoryCount[];
+  brands: BrandCount[];
+  priceRanges: PriceRangeCount[];
+  minPrice: number | null;
+  maxPrice: number | null;
+}
+
+/** Answer of GET /api/products: a page of products plus search details. */
+export interface ProductSearchResponse extends PageResponse<ProductSummary> {
+  /** Normalised keyword (trimmed, spaces collapsed), null without keyword. */
+  keyword: string | null;
+  /** Correction of a keyword that matched nothing exactly (keyboard layout, spelling). */
+  correctedKeyword: string | null;
+  /** `content` are the results for correctedKeyword, the original keyword found nothing. */
+  correctionApplied: boolean;
+  facets: SearchFacets;
+}
+
+export interface SuggestProduct {
+  id: number;
+  name: string;
+  slug: string;
+  brand: string | null;
+  thumbnailUrl: string | null;
+  price: number;
+  compareAtPrice: number | null;
+  currency: string;
+  inStock: boolean;
+}
+
+/** Answer of GET /api/products/suggest (type-ahead). */
+export interface SearchSuggestions {
+  query: string;
+  correctedQuery: string | null;
+  products: SuggestProduct[];
+  categories: CategoryCount[];
+  brands: BrandCount[];
+  completions: string[];
+  totalProducts: number;
+}
+
+export interface PopularSearches {
+  queries: string[];
+  /** Best-selling leaf categories, count = active products in it. */
+  categories: CategoryCount[];
+}
+
+export interface SearchQueryStat {
+  query: string;
+  searches: number;
+  averageResults: number;
+  lastSearchedAt: string;
+}
+
+export interface ZeroResultQueryStat {
+  query: string;
+  searches: number;
+  lastSearchedAt: string;
+}
+
+export interface SearchStats {
+  from: string;
+  to: string;
+  totalSearches: number;
+  uniqueQueries: number;
+  zeroResultSearches: number;
+  /** 0..1 */
+  zeroResultRate: number;
+  topQueries: SearchQueryStat[];
+  zeroResultQueries: ZeroResultQueryStat[];
+}
+
+export interface SynonymGroup {
+  id: number;
+  /** Lower-case, trimmed, de-duplicated. */
+  terms: string[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ProductImage {
@@ -178,6 +286,8 @@ export interface Review {
   authorName: string;
   rating: number;
   comment: string | null;
+  /** The author received the product in a delivered order («Покупка подтверждена»). */
+  verifiedPurchase: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -186,7 +296,56 @@ export interface MyReview {
   /** The caller received a delivered order containing the product. */
   purchased: boolean;
   canReview: boolean;
+  /** Delivery of the latest order containing the product; null when not purchased. */
+  purchasedAt: string | null;
   review: Review | null;
+}
+
+/** A product the caller received and has not reviewed (GET /api/reviews/pending). */
+export interface PendingReview {
+  productId: number;
+  slug: string;
+  name: string;
+  imageUrl: string | null;
+  /** Latest delivered order containing the product. */
+  orderId: string;
+  deliveredAt: string;
+}
+
+/** GET /api/reviews/pending/count */
+export interface PendingReviewCount {
+  count: number;
+  /** Products not reviewed yet in each order asked with orderIds; orders without any are absent. */
+  byOrder: Record<string, number>;
+}
+
+/** PUBLISHED while the product is in the catalogue, HIDDEN once withdrawn (the review can only be deleted). */
+export type ReviewVisibility = "PUBLISHED" | "HIDDEN";
+
+/** A review written by the caller (GET /api/reviews/mine). */
+export interface UserReview {
+  id: number;
+  productId: number;
+  productSlug: string;
+  productName: string;
+  productImageUrl: string | null;
+  status: ReviewVisibility;
+  rating: number;
+  comment: string | null;
+  authorName: string;
+  verifiedPurchase: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Review state of one product for the caller (GET /api/reviews/status). */
+export interface ReviewStatus {
+  productId: number;
+  purchased: boolean;
+  /** Purchased and still in the catalogue. */
+  canReview: boolean;
+  reviewed: boolean;
+  rating: number | null;
 }
 
 export interface AdminReview extends Review {
@@ -471,12 +630,22 @@ export interface Payment {
 
 // ---------------------------------------------------------------- notification-service
 
-export type NotificationType = "WELCOME" | "ORDER_PLACED" | "ORDER_CONFIRMED" | "ORDER_CANCELLED" | "PASSWORD_RESET";
-export type NotificationStatus = "PENDING" | "SENT" | "FAILED";
+export type NotificationType =
+  | "WELCOME"
+  | "ORDER_PLACED"
+  | "ORDER_CONFIRMED"
+  | "ORDER_CANCELLED"
+  | "PASSWORD_RESET"
+  | "REVIEW_REQUEST"
+  | "REVIEW_REMINDER";
+/** IN_APP notifications are only listed in the account, never e-mailed. */
+export type NotificationChannel = "EMAIL" | "IN_APP";
+export type NotificationStatus = "PENDING" | "SENDING" | "SENT" | "FAILED" | "EXPIRED";
 
 export interface Notification {
   id: string;
   type: NotificationType;
+  channel: NotificationChannel;
   userId: string | null;
   recipient: string;
   reference: string | null;
@@ -488,4 +657,10 @@ export interface Notification {
   lastError: string | null;
   sentAt: string | null;
   createdAt: string;
+}
+
+/** GET/PUT /api/notifications/preferences */
+export interface NotificationPreferences {
+  /** Whether the e-mail reminding to review delivered products is sent. */
+  reviewReminders: boolean;
 }

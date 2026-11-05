@@ -8,7 +8,7 @@
 |---|---|
 | `constant` | `HeaderConstants` (X-Correlation-Id, X-User-Id...), `RoleConstants`, `MessagingConstants` (exchange, routing key, очереди RabbitMQ), `LoggingConstants` |
 | `dto` | `ApiResponse<T>`, `ErrorResponse`, `FieldViolation`, `PageResponse<T>` |
-| `event` | Контракты событий RabbitMQ (record): `OrderCreatedEvent`, `StockReservedEvent`, `StockReservationFailedEvent`, `StockReleasedEvent`, `PaymentRequestedEvent`, `PaymentSucceededEvent`, `PaymentFailedEvent`, `OrderConfirmedEvent`, `OrderCancelledEvent`, `UserRegisteredEvent`, `ProductCreatedEvent` |
+| `event` | Контракты событий RabbitMQ (record): `OrderCreatedEvent`, `StockReservedEvent`, `StockReservationFailedEvent`, `StockReleasedEvent`, `StockLevelChangedEvent`, `PaymentRequestedEvent`, `PaymentSucceededEvent`, `PaymentFailedEvent`, `OrderConfirmedEvent`, `OrderCancelledEvent`, `OrderDeliveredEvent`, `PaymentRefundedEvent`, `UserRegisteredEvent`, `PasswordResetRequestedEvent`, `ProductCreatedEvent` |
 | `exception` | `ErrorCode` + бизнес-исключения: `ResourceNotFoundException`, `BadRequestException`, `ConflictException`, `BusinessException`, `UnauthorizedException`, `ForbiddenException`, `ServiceUnavailableException` |
 | `web` | `AbstractGlobalExceptionHandler` — обработка ошибок с приведением к `ErrorResponse` |
 | `logging` | Filter/interceptor/post-processor для передачи correlation id через HTTP, Feign, RabbitMQ |
@@ -52,12 +52,13 @@ payment.failed    ──► order (CANCELLED) ──► order.cancelled ──�
 
 Заказ, отменённый покупателем, администратором или задачей по истечении срока оплаты, тоже публикует `order.cancelled`, как показано выше.
 
-Вне Saga: `user.registered` (auth → user, notification), `product.created` (product → inventory).
+Вне Saga: `user.registered` (auth → user, notification), `product.created` (product → inventory),
+`stock.level-changed` (inventory → product: признак наличия для поиска), `order.delivered` (order → product).
 
 | Exchange | Producer | Routing key |
 |---|---|---|
 | `shop.order.events` | order-service | `order.created`, `order.payment-requested`, `order.confirmed`, `order.cancelled` |
-| `shop.inventory.events` | inventory-service | `stock.reserved`, `stock.reservation-failed`, `stock.released` |
+| `shop.inventory.events` | inventory-service | `stock.reserved`, `stock.reservation-failed`, `stock.released`, `stock.level-changed` |
 | `shop.payment.events` | payment-service | `payment.succeeded`, `payment.failed` |
 | `shop.user.events` | auth-service | `user.registered` |
 | `shop.product.events` | product-service | `product.created` |
@@ -69,6 +70,7 @@ payment.failed    ──► order (CANCELLED) ──► order.cancelled ──�
 | inventory-service | `inventory.order-created`, `inventory.order-confirmed`, `inventory.order-cancelled`, `inventory.product-created` |
 | order-service | `order.stock-reserved`, `order.stock-reservation-failed`, `order.payment-succeeded`, `order.payment-failed` |
 | payment-service | `payment.payment-requested` ← `order.payment-requested`; `payment.order-cancelled` ← `order.cancelled` |
+| product-service | `product.order-delivered` ← `order.delivered`; `product.stock-level-changed` ← `stock.level-changed` |
 | cart-service | `cart.order-created` ← `order.created` |
 | user-service | `user.user-registered` ← `user.registered` |
 | notification-service | `notification.order-events` ← `order.created`, `order.confirmed`, `order.cancelled`; `notification.user-events` ← `user.registered` |

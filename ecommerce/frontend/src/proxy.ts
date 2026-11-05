@@ -8,6 +8,7 @@ import {
   REFRESH_COOKIE,
   setAuthCookies,
 } from "@/lib/server/auth-cookies";
+import { errorJson } from "@/lib/server/route-utils";
 import { refreshTokens, type RefreshResult } from "@/lib/server/token-refresh";
 
 /** Pages that need a signed-in customer; /admin additionally needs ROLE_ADMIN. */
@@ -17,7 +18,8 @@ const PROTECTED_PREFIXES = ["/cart", "/checkout", "/orders", "/payment", "/accou
  * Runs before every page and API route:
  * 1. renews an expired access token with the refresh token, so pages and API calls always see a
  *    valid one (the renewed cookies are applied to this request and sent back to the browser);
- * 2. sends visitors of protected pages to the login page.
+ * 2. sends visitors of protected pages to the login page (or shows that the shop is unavailable
+ *    while auth-service cannot renew the session).
  * Authorization itself is enforced by the gateway and the services.
  */
 export async function proxy(request: NextRequest) {
@@ -39,7 +41,13 @@ export async function proxy(request: NextRequest) {
 
   const { pathname, search } = request.nextUrl;
   let response: NextResponse;
-  if (isProtected(pathname) && !session) {
+  if (refresh?.kind === "unavailable" && (pathname.startsWith("/api/") || isProtected(pathname))) {
+    // auth-service is down and the refresh token may still be valid: the cookies are kept and the
+    // visitor sees that the shop is unavailable instead of being asked to sign in again
+    response = pathname.startsWith("/api/")
+      ? errorJson(503, "SERVICE_UNAVAILABLE", "The authentication service cannot be reached", pathname)
+      : NextResponse.rewrite(new URL("/unavailable", request.url), { status: 503 });
+  } else if (isProtected(pathname) && !session) {
     const login = new URL("/login", request.url);
     login.searchParams.set("next", pathname + search);
     response = NextResponse.redirect(login);

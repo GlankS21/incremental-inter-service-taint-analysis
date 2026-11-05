@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import com.shop.common.constant.MessagingConstants;
 import com.shop.common.event.OrderCancelledEvent;
+import com.shop.common.event.PaymentFailedEvent;
 import com.shop.common.event.PaymentRefundedEvent;
 import com.shop.common.event.PaymentRequestedEvent;
 import com.shop.common.event.PaymentSucceededEvent;
@@ -13,6 +14,8 @@ import com.shop.common.security.JwtClaimNames;
 import com.shop.common.security.JwtProperties;
 import com.shop.payment.entity.Payment;
 import com.shop.payment.entity.PaymentStatus;
+import com.shop.payment.gateway.PaymentGateway;
+import com.shop.payment.gateway.mock.MockPaymentGateway;
 import com.shop.payment.repository.PaymentRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.AmqpAdmin;
@@ -40,6 +43,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.YearMonth;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
@@ -92,6 +96,8 @@ class PaymentSagaIntegrationTest {
     private TopicExchange paymentExchange;
     @Autowired
     private PaymentRepository paymentRepository;
+    @Autowired
+    private MockPaymentGateway mockPaymentGateway;
 
     @Test
     void declinedCardIsReplacedByAnotherAndRefundedAfterCancellation() throws Exception {
@@ -173,6 +179,61 @@ class PaymentSagaIntegrationTest {
         assertThat(done.at("/status").asText()).isEqualTo("REFUNDED");
         assertThat(done.at("/transactions").size()).isEqualTo(3);
         assertThat(done.at("/transactions/2/type").asText()).isEqualTo("REFUND");
+    }
+
+    @Test
+    void cancelledOrderCannotBePaidAndALateCaptureIsRefundedWithNotice() throws Exception {
+        String refunded = probe(MessagingConstants.PAYMENT_REFUNDED_KEY);
+        UUID orderId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        String customer = token(userId, "ROLE_CUSTOMER");
+        PaymentRequestedEvent request = paymentRequested(orderId, userId, "4990.00", "ONLINE");
+        rabbitTemplate.convertAndSend(MessagingConstants.ORDER_EXCHANGE, MessagingConstants.ORDER_PAYMENT_REQUESTED_KEY,
+                request);
+        waitUntil(() -> paymentRepository.findByOrderId(orderId).map(Payment::getConfirmationToken).isPresent());
+        String charge = currentChargeId(paymentOf(orderId, customer));
+
+        rabbitTemplate.convertAndSend(MessagingConstants.ORDER_EXCHANGE, MessagingConstants.ORDER_CANCELLED_KEY,
+                new OrderCancelledEvent(UUID.randomUUID(), Instant.now(), orderId, request.orderNumber(), userId,
+                        "jane@example.com", "Payment expired"));
+        waitUntil(() -> payment(orderId).getStatus() == PaymentStatus.CANCELLED);
+
+        // The card form of the cancelled order is refused before the card is charged
+        pay(charge, "5555555555554444", null, customer)
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.message").value("Этот заказ больше нельзя оплатить"));
+        assertThat(mockPaymentGateway.getPayment(charge).status()).isEqualTo(PaymentGateway.Status.PENDING);
+
+        // The provider captured the payment anyway (paid on its page just before the cancellation)
+        mockPaymentGateway.pay(charge, "5555555555554444", YearMonth.of(2030, 12), null);
+        mockMvc.perform(post("/api/payments/orders/" + orderId + "/refresh").header(HttpHeaders.AUTHORIZATION, customer))
+                .andExpect(status().isOk());
+
+        // The money goes back and order-service is told, so that the customer learns about the refund
+        PaymentRefundedEvent refund = receive(refunded, new ParameterizedTypeReference<>() {
+        });
+        assertThat(refund).isNotNull();
+        assertThat(refund.orderId()).isEqualTo(orderId);
+        assertThat(refund.amount()).isEqualByComparingTo("4990.00");
+        assertThat(payment(orderId).getStatus()).isEqualTo(PaymentStatus.REFUNDED);
+    }
+
+    @Test
+    void requestWithoutAPositiveAmountIsDeclined() {
+        String failed = probe(MessagingConstants.PAYMENT_FAILED_KEY);
+        UUID orderId = UUID.randomUUID();
+
+        rabbitTemplate.convertAndSend(MessagingConstants.ORDER_EXCHANGE, MessagingConstants.ORDER_PAYMENT_REQUESTED_KEY,
+                paymentRequested(orderId, UUID.randomUUID(), "0", "ONLINE"));
+
+        // Not stuck in the dead-letter queue: order-service is told to cancel the order
+        PaymentFailedEvent declined = receive(failed, new ParameterizedTypeReference<>() {
+        });
+        assertThat(declined).isNotNull();
+        assertThat(declined.orderId()).isEqualTo(orderId);
+        assertThat(declined.reason()).isEqualTo("Некорректная сумма платежа");
+        assertThat(payment(orderId).getStatus()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(payment(orderId).getFailureReason()).isEqualTo("invalid_amount");
     }
 
     @Test

@@ -67,7 +67,9 @@ OpenAPI JSON каждого сервиса: `http://localhost:8080/docs/<service
 
 | Method | Путь | Права | Описание |
 |---|---|---|---|
-| GET | `/api/products` | публично | Поиск: `keyword`, `categoryId` (включая дочерние категории), `brand`, `minPrice`, `maxPrice`, `sort` (`price`, `name`, `createdAt`, `updatedAt`, `sku`, `ratingAverage`); результат содержит `ratingAverage`, `ratingCount`; администратор может дополнительно фильтровать по `status` |
+| GET | `/api/products` | публично | Поиск: `keyword` (≤ 100 символов; морфология, синонимы, раскладка, опечатки), `categoryId` (включая дочерние категории), `brand`, `minPrice`, `maxPrice`, `sort` (`relevance` — по умолчанию с `keyword`, `price`, `name`, `createdAt` — по умолчанию без `keyword`, `updatedAt`, `sku`, `ratingAverage`, `salesCount`); товары содержат `ratingAverage`, `ratingCount`, `inStock`, `salesCount`; ответ дополнительно содержит `keyword`, `correctedKeyword`, `correctionApplied` и `facets {categories, brands, priceRanges, minPrice, maxPrice}`; администратор может дополнительно фильтровать по `status` |
+| GET | `/api/products/suggest?q=` | публично | Подсказки поиска одним запросом: ≤ 5 товаров, 3 категории, 3 бренда, ≤ 5 продолжений, `totalProducts`, `correctedQuery`; кэш 60 с, отдельный rate limit в gateway (429) |
+| GET | `/api/products/search/popular` | публично | Популярные запросы (30 дней) и самые продаваемые категории |
 | GET | `/api/products/{id}`, `/api/products/slug/{slug}` | публично | Подробности (покупатель видит только товары в продаже) |
 | GET | `/api/products/by-ids?ids=1,2` | публично | Несколько товаров (не более 100) |
 | POST | `/api/products` | admin | Создание (по умолчанию `DRAFT`) |
@@ -77,14 +79,24 @@ OpenAPI JSON каждого сервиса: `http://localhost:8080/docs/<service
 | POST | `/api/products/images` | admin | Загрузка изображения multipart (part `file`, JPEG/PNG/WebP/GIF с проверкой по magic bytes, ≤ 5 МБ) → `201 { url, contentType, size }` |
 | GET | `/api/products/images/{file}` | публично | Загруженное изображение (кеш на 1 год) |
 | GET | `/api/products/{id}/reviews?page=&size=` | публично | Отзывы о товаре (сначала новые, не более 50 на страницу) |
-| GET | `/api/reviews/products/{id}/mine` | вход | `{ purchased, canReview, review }` вызывающего |
+| GET | `/api/reviews/products/{id}/mine` | вход | `{ purchased, canReview, purchasedAt, review }` вызывающего |
 | PUT | `/api/reviews/products/{id}` | вход | Написать / изменить отзыв `{ "rating": 1–5, "comment", "authorName" }`; товар ещё не получен → `422` |
 | DELETE | `/api/reviews/products/{id}` | вход | Удалить свой отзыв |
+| GET | `/api/reviews/pending?page=&size=` | вход | Полученные товары без моего отзыва, сначала недавно доставленные: `{ productId, slug, name, imageUrl, orderId, deliveredAt }` (только `ACTIVE`, каждый товар один раз) |
+| GET | `/api/reviews/pending/count?orderIds=` | вход | `{ count, byOrder }` — всего товаров без отзыва (бейдж «Мои отзывы») и по моим заказам из `orderIds` (не более 50) |
+| GET | `/api/reviews/mine?page=&size=&sort=` | вход | Мои отзывы с товаром (`productName`, `productImageUrl`, `productSlug`), `status` `PUBLISHED`/`HIDDEN`, `createdAt`, `updatedAt` |
+| GET | `/api/reviews/status?productIds=1,2,3` | вход | `[{ productId, purchased, canReview, reviewed, rating }]` одним запросом, от 1 до 50 id (иначе `400`) |
 | GET | `/api/reviews/admin?productId=&rating=` | admin | Все отзывы |
 | DELETE | `/api/reviews/admin/{reviewId}` | admin | Удалить отзыв (средняя оценка пересчитывается) |
+| GET | `/api/search/admin/stats?days=&limit=` | admin | Статистика поиска: частые запросы и запросы без результатов |
+| GET / POST | `/api/search/admin/synonyms` | admin | Список (`keyword`) / создание группы синонимов `{terms}` (201; слово другой группы → 409) |
+| PUT / DELETE | `/api/search/admin/synonyms/{id}` | admin | Изменение / удаление группы синонимов |
 | GET | `/api/categories` | публично | Двухуровневое дерево категорий |
 | GET | `/api/categories/{id}`, `/api/categories/slug/{slug}` | публично | Одна категория |
 | POST / PUT / DELETE | `/api/categories[/{id}]` | admin | Управление категориями (удалить можно только пустую категорию) |
+
+Каждый отзыв содержит `verifiedPurchase` (на сайте — «Покупка подтверждена»). Все `/api/reviews/**`, кроме
+административных, возвращают только данные вызывающего (id пользователя берётся из JWT, а не из параметров).
 
 Названия и описания демонстрационного каталога — на русском; slug — латинская транслитерация кириллических
 названий (например, `/api/products/slug/<slug-латиницей>`).
@@ -166,6 +178,11 @@ OpenAPI JSON каждого сервиса: `http://localhost:8080/docs/<service
 
 | Method | Путь | Права | Описание |
 |---|---|---|---|
-| GET | `/api/notifications` | вход | Письма, отправленные мне |
+| GET | `/api/notifications` | вход | Мои письма и уведомления в кабинете (`channel`: `EMAIL` / `IN_APP`) |
+| GET / PUT | `/api/notifications/preferences` | вход | Мои настройки `{ reviewReminders }` — письмо-напоминание об отзыве |
 | GET | `/api/notifications/admin?status=&type=` | admin | Поиск писем |
-| POST | `/api/notifications/admin/{id}/resend` | admin | Отправить повторно |
+| POST | `/api/notifications/admin/{id}/resend` | admin | Отправить повторно (уведомления `IN_APP` — `400`) |
+
+После доставки заказа (`order.delivered`) в кабинете появляется уведомление «Оцените покупку». Через
+`REVIEW_REMINDER_DELAY_DAYS` дней (по умолчанию 3) product-service публикует `review.reminder-due`, и, если в заказе
+остались неоценённые товары, покупатель получает одно письмо со ссылками `/account/reviews?product=<id>`.

@@ -2,27 +2,28 @@ package com.shop.product.controller;
 
 import com.shop.common.autoconfigure.CommonMessagesAutoConfiguration;
 import com.shop.common.dto.ApiResponse;
-import com.shop.common.dto.PageResponse;
 import com.shop.common.security.SecurityUtils;
 import com.shop.product.config.OpenApiConfig;
 import com.shop.product.dto.request.ProductRequest;
 import com.shop.product.dto.request.ProductSearchCriteria;
 import com.shop.product.dto.request.ProductStatusRequest;
 import com.shop.product.dto.response.ProductResponse;
+import com.shop.product.dto.response.ProductSearchResponse;
 import com.shop.product.dto.response.ProductSummaryResponse;
 import com.shop.product.entity.ProductStatus;
+import com.shop.product.service.ProductSearchService;
 import com.shop.product.service.ProductService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.MessageSource;
 import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
-import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -47,27 +48,40 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ProductController {
 
+    /** Price filters fit the {@code NUMERIC(14, 2)} price column; larger values overflow in the query. */
+    private static final String PRICE_FILTER_MESSAGE = "{validation.price-filter}";
+
     private final ProductService productService;
+    private final ProductSearchService productSearchService;
     private final MessageSource messageSource;
 
     @Operation(summary = "Поиск по каталогу",
-            description = "Сортировка по полям price, name, createdAt, updatedAt, sku, ratingAverage. "
-                    + "Пример: sort=price,asc")
+            description = "Полнотекстовый поиск с учётом морфологии русского языка, синонимов, раскладки "
+                    + "клавиатуры и опечаток; ответ содержит исправленный запрос (correctedKeyword) и фасеты "
+                    + "(категории, бренды, диапазоны цен). Сортировка по полям relevance, price, name, createdAt, "
+                    + "updatedAt, sku, ratingAverage, salesCount. По умолчанию: relevance при наличии keyword, "
+                    + "иначе createdAt,desc. Пример: sort=price,asc")
     @GetMapping
-    public ApiResponse<PageResponse<ProductSummaryResponse>> search(
-            @Parameter(description = "Часть названия, артикула или бренда")
+    public ApiResponse<ProductSearchResponse> search(
+            @Parameter(description = "Поисковый запрос (название, бренд, категория, описание, артикул), "
+                    + "не длиннее 100 символов")
             @RequestParam(name = "keyword", required = false) String keyword,
             @Parameter(description = "Идентификатор категории; корневая категория включает свои подкатегории")
             @RequestParam(name = "categoryId", required = false) Long categoryId,
             @RequestParam(name = "brand", required = false) String brand,
-            @RequestParam(name = "minPrice", required = false) BigDecimal minPrice,
-            @RequestParam(name = "maxPrice", required = false) BigDecimal maxPrice,
+            @Parameter(description = "Цена в рублях: от 0 до 999 999 999 999,99, не больше двух знаков после запятой")
+            @RequestParam(name = "minPrice", required = false)
+            @DecimalMin(value = "0", message = PRICE_FILTER_MESSAGE)
+            @Digits(integer = 12, fraction = 2, message = PRICE_FILTER_MESSAGE) BigDecimal minPrice,
+            @Parameter(description = "Цена в рублях: от 0 до 999 999 999 999,99, не больше двух знаков после запятой")
+            @RequestParam(name = "maxPrice", required = false)
+            @DecimalMin(value = "0", message = PRICE_FILTER_MESSAGE)
+            @Digits(integer = 12, fraction = 2, message = PRICE_FILTER_MESSAGE) BigDecimal maxPrice,
             @Parameter(description = "Только для администраторов; для остальных пользователей не учитывается")
             @RequestParam(name = "status", required = false) ProductStatus status,
-            @ParameterObject
-            @PageableDefault(sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
+            @ParameterObject Pageable pageable) {
         ProductSearchCriteria criteria = new ProductSearchCriteria(keyword, categoryId, brand, minPrice, maxPrice, status);
-        return ApiResponse.success(productService.searchProducts(criteria, pageable, SecurityUtils.currentUserIsAdmin()));
+        return ApiResponse.success(productSearchService.search(criteria, pageable, SecurityUtils.currentUserIsAdmin()));
     }
 
     @Operation(summary = "Несколько товаров по идентификаторам (не более 100)",
