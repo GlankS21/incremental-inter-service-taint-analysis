@@ -102,8 +102,11 @@ final class AmqpExtractor {
         if (TEMPLATE_TYPES.contains(receiver) && TEMPLATE_METHODS.contains(name)) {
             mechanism = "RABBIT_TEMPLATE";
             // convertAndSend(exchange, routingKey, message, ...) vs convertAndSend(routingKey, message, postProcessor)
+            // and convertAndSend(routingKey, message, correlationData)
             boolean explicitExchange = args.size() >= 3
-                    && !(args.get(2).isLambdaExpr() || args.get(2).isMethodReferenceExpr());
+                    && !(args.get(2).isLambdaExpr() || args.get(2).isMethodReferenceExpr())
+                    && !(args.size() == 3 && resolver.typeOf(args.get(2), ValueResolver.Ctx.root(Ast.enclosingCallable(call)))
+                            .filter("CorrelationData"::equals).isPresent());
             if (explicitExchange) {
                 exchange = args.get(0);
                 routingKey = args.get(1);

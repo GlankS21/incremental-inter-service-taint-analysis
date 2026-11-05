@@ -24,6 +24,22 @@ import java.util.List;
  */
 public final class MicansTaintMain {
 
+    /**
+     * Plugins added to Micans' own; system property {@code vkr.plugins} replaces them (the Micans
+     * benchmark runs keep Micans' modelling and add only the channel plugins).
+     */
+    private static final String DEFAULT_PLUGINS = String.join(",",
+            "vkr.plugin.SpringDataModel",
+            "vkr.plugin.ContainerTaint",
+            "vkr.plugin.StringConcatTaint",
+            "vkr.plugin.ValidatedFieldBarrier",
+            "vkr.plugin.ExceptionMessageBarrier",
+            "vkr.plugin.NonTextVarBarrier",
+            "vkr.plugin.FreshEntityBarrier",
+            "vkr.plugin.JdkTaintBarrier",
+            "vkr.plugin.ListenerEntryPoints",
+            "vkr.plugin.DebugDump");
+
     private MicansTaintMain() {
     }
 
@@ -65,18 +81,10 @@ public final class MicansTaintMain {
                       plugins:[micans.plugin.spring.SpringAnalysis,
                                micans.plugin.rpc.RpcAnalysis,
                                micans.plugin.mbc.MbcAnalysis,
-                               vkr.plugin.SpringDataModel,
-                               vkr.plugin.ContainerTaint,
-                               vkr.plugin.StringConcatTaint,
-                               vkr.plugin.ValidatedFieldBarrier,
-                               vkr.plugin.ExceptionMessageBarrier,
-                               vkr.plugin.NonTextVarBarrier,
-                               vkr.plugin.FreshEntityBarrier,
-                               vkr.plugin.JdkTaintBarrier,
-                               vkr.plugin.ListenerEntryPoints,
-                               vkr.plugin.DebugDump];
+                               %s];
                       time-limit:3600;
-                      """.formatted(cs, taintConfig.replace('\\', '/'))));
+                      """.formatted(cs, taintConfig.replace('\\', '/'),
+                        System.getProperty("vkr.plugins", DEFAULT_PLUGINS))));
         int status = 0;
         try {
             pascal.taie.Main.main(args.toArray(new String[0]));
