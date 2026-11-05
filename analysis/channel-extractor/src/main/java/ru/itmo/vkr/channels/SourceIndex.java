@@ -6,6 +6,8 @@ import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParseResult;
 import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.ImportDeclaration;
+import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.TypeDeclaration;
 
@@ -15,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -68,7 +71,9 @@ final class SourceIndex {
             }
             boolean service = units.stream()
                     .flatMap(unit -> unit.findAll(ClassOrInterfaceDeclaration.class).stream())
-                    .anyMatch(type -> Ast.hasAnnotation(type, "SpringBootApplication"));
+                    // @SpringCloudApplication (Spring Cloud before 2020) is meta-annotated with @SpringBootApplication
+                    .anyMatch(type -> Ast.hasAnnotation(type, "SpringBootApplication")
+                            || Ast.hasAnnotation(type, "SpringCloudApplication"));
             modules.add(new Module(serviceName(dir), dir, service, List.copyOf(units)));
         }
         return new SourceIndex(List.copyOf(modules), warnings);
@@ -93,6 +98,37 @@ final class SourceIndex {
     Optional<TypeDeclaration<?>> type(String simpleName) {
         List<TypeDeclaration<?>> types = typesBySimpleName.get(simpleName);
         return types == null ? Optional.empty() : Optional.of(types.getFirst());
+    }
+
+    /**
+     * The type with this simple name as seen from {@code context}: when several modules declare one
+     * (each API module of a system may have its own {@code QueueNameConstant}), the one the
+     * compilation unit of {@code context} imports or shares a package with.
+     */
+    Optional<TypeDeclaration<?>> type(String simpleName, Node context) {
+        List<TypeDeclaration<?>> types = typesBySimpleName.get(simpleName);
+        if (types == null) {
+            return Optional.empty();
+        }
+        CompilationUnit unit = context.findCompilationUnit().orElse(null);
+        if (types.size() == 1 || unit == null) {
+            return Optional.of(types.getFirst());
+        }
+        Set<String> visible = new HashSet<>();
+        unit.getPackageDeclaration().ifPresent(p -> visible.add(p.getNameAsString() + "." + simpleName));
+        for (ImportDeclaration imported : unit.getImports()) {
+            String name = imported.getNameAsString();
+            visible.add(imported.isAsterisk() ? name + "." + simpleName : name);
+            if (imported.isStatic() && !imported.isAsterisk()) {
+                // import static a.b.Type.CONSTANT
+                imported.getName().getQualifier().ifPresent(q -> visible.add(q.asString()));
+            }
+        }
+        return types.stream()
+                .filter(t -> t.getFullyQualifiedName().filter(visible::contains).isPresent())
+                .<TypeDeclaration<?>>map(t -> t)
+                .findFirst()
+                .or(() -> Optional.of(types.getFirst()));
     }
 
     private static List<Path> moduleDirs(Path root) throws IOException {
@@ -129,8 +165,19 @@ final class SourceIndex {
      */
     private static String serviceName(Path moduleDir) {
         Path resources = moduleDir.resolve("src/main/resources");
+        List<Path> configs = new ArrayList<>();
         for (String file : List.of("application.yml", "application.yaml", "bootstrap.yml", "bootstrap.yaml")) {
-            Path config = resources.resolve(file);
+            configs.add(resources.resolve(file));
+        }
+        // profile files (bootstrap-open.yml) when the plain ones do not set the name
+        try (Stream<Path> files = Files.isDirectory(resources) ? Files.list(resources) : Stream.empty()) {
+            files.filter(f -> f.getFileName().toString().matches("(application|bootstrap)-[\\w.-]+\\.ya?ml"))
+                    .sorted()
+                    .forEach(configs::add);
+        } catch (IOException ignored) {
+            // unreadable resources: fall back to the directory name
+        }
+        for (Path config : configs) {
             if (Files.isRegularFile(config)) {
                 try {
                     JsonNode name = YAML.readTree(config.toFile()).path("spring").path("application").path("name");

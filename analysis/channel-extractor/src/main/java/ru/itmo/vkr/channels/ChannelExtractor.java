@@ -48,7 +48,7 @@ public final class ChannelExtractor {
             warnings.add("No gateway configuration found: endpoint exposure is unknown");
         }
 
-        SpringWebExtractor web = new SpringWebExtractor(root, resolver, gateway);
+        SpringWebExtractor web = new SpringWebExtractor(root, index, resolver, gateway);
         AmqpExtractor amqp = new AmqpExtractor(root, resolver, AmqpExtractor.DEFAULT_OUTBOX_SIGNATURES);
         List<String> services = new ArrayList<>();
         List<Endpoint> endpoints = new ArrayList<>();

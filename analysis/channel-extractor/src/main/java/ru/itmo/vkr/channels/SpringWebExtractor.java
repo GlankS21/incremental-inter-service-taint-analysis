@@ -54,11 +54,13 @@ final class SpringWebExtractor {
     private static final String UNRESOLVED_SEGMENT = "{unresolved}";
 
     private final Path root;
+    private final SourceIndex index;
     private final ValueResolver resolver;
     private final GatewayRoutes gateway;
 
-    SpringWebExtractor(Path root, ValueResolver resolver, GatewayRoutes gateway) {
+    SpringWebExtractor(Path root, SourceIndex index, ValueResolver resolver, GatewayRoutes gateway) {
         this.root = root;
+        this.index = index;
         this.resolver = resolver;
         this.gateway = gateway;
     }
@@ -74,10 +76,24 @@ final class SpringWebExtractor {
                 }
                 if (type.isInterface()) {
                     Ast.annotation(type, "FeignClient")
-                            .ifPresent(feign -> feignClient(module, type, feign, clients));
+                            .ifPresent(feign -> feignClient(module, type, feign, clients, false));
                 }
             }
             programmaticHttpCalls(module, unit, unresolved);
+        }
+        // clients declared in a shared API module belong to the services that call them
+        for (SourceIndex.Module library : index.modules()) {
+            if (library.service()) {
+                continue;
+            }
+            for (CompilationUnit unit : library.units()) {
+                for (ClassOrInterfaceDeclaration type : unit.findAll(ClassOrInterfaceDeclaration.class)) {
+                    if (type.isInterface()) {
+                        Ast.annotation(type, "FeignClient")
+                                .ifPresent(feign -> feignClient(module, type, feign, clients, true));
+                    }
+                }
+            }
         }
         return new Result(endpoints, clients, unresolved);
     }
@@ -104,7 +120,7 @@ final class SpringWebExtractor {
     }
 
     private void feignClient(SourceIndex.Module module, ClassOrInterfaceDeclaration client, AnnotationExpr feign,
-                             List<HttpClientMethod> out) {
+                             List<HttpClientMethod> out, boolean calledOnly) {
         String target = first(Ast.attribute(feign, "name", "value", "serviceId"));
         String url = first(Ast.attribute(feign, "url"));
         String basePath = first(Ast.attribute(feign, "path"));
@@ -116,6 +132,9 @@ final class SpringWebExtractor {
             }
             List<Param> params = params(method);
             List<CodeRef> callSites = callSites(module, client.getNameAsString(), method.getNameAsString());
+            if (calledOnly && callSites.isEmpty()) {
+                continue;
+            }
             for (String prefix : prefixes) {
                 for (String path : mapping.get().paths()) {
                     String fullPath = Patterns.joinPaths(basePath, prefix, path);

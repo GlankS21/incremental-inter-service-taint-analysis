@@ -1,5 +1,6 @@
 package vkr.plugin;
 
+import micans.plugin.spring.AppFirstParamProvider;
 import micans.plugin.spring.Bean;
 import micans.plugin.spring.MicroserviceHolder;
 import org.apache.logging.log4j.LogManager;
@@ -48,8 +49,12 @@ public class ListenerEntryPoints implements Plugin {
                     if (m.isAbstract() || !m.hasAnnotation(RABBIT_LISTENER)) {
                         continue;
                     }
+                    // with vkr.listenerTaint the payload is mocked like a web-endpoint parameter, whose
+                    // String fields Micans taints: the receiving end of a message channel
                     var params = new SpecifiedParamProvider.Builder(m)
-                            .setDelegate(new DeclaredParamProvider(m, solver.getHeapModel(), 1))
+                            .setDelegate(Boolean.getBoolean("vkr.listenerTaint")
+                                    ? new AppFirstParamProvider(m, solver, true)
+                                    : new DeclaredParamProvider(m, solver.getHeapModel(), 1))
                             .addThisObj(Set.of())
                             .build();
                     solver.addEntryPoint(new EntryPoint(m, params));

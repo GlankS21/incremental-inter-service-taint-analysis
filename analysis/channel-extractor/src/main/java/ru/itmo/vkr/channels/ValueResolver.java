@@ -5,12 +5,16 @@ import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.ImportDeclaration;
 import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.body.CallableDeclaration;
+import com.github.javaparser.ast.body.ConstructorDeclaration;
+import com.github.javaparser.ast.body.EnumConstantDeclaration;
+import com.github.javaparser.ast.body.EnumDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.ArrayCreationExpr;
 import com.github.javaparser.ast.expr.ArrayInitializerExpr;
+import com.github.javaparser.ast.expr.AssignExpr;
 import com.github.javaparser.ast.expr.BinaryExpr;
 import com.github.javaparser.ast.expr.CastExpr;
 import com.github.javaparser.ast.expr.ConditionalExpr;
@@ -93,7 +97,7 @@ final class ValueResolver {
             "topicExchange", "directExchange", "fanoutExchange", "headersExchange", "durable", "nonDurable");
     /** Spring AMQP declarables whose first constructor argument is the name. */
     private static final Set<String> NAMED_DECLARABLES = Set.of(
-            "Queue", "TopicExchange", "DirectExchange", "FanoutExchange", "HeadersExchange");
+            "Queue", "TopicExchange", "DirectExchange", "FanoutExchange", "HeadersExchange", "CustomExchange");
 
     /** Parameter type of implicitly typed callbacks, keyed by {@code ReceiverType#method}. */
     private static final Map<String, String> CALLBACK_PARAMETER_TYPES = Map.of(
@@ -242,8 +246,9 @@ final class ValueResolver {
                 bound.expressions().forEach(e -> values.addAll(strings(e, bound.ctx())));
                 return values;
             }
-            if (owner.getParameterByName(id).isPresent()) {
-                return Set.of();
+            Optional<Parameter> param = owner.getParameterByName(id);
+            if (param.isPresent()) {
+                return beanParameter(owner, param.get(), ctx);
             }
         }
         Optional<Set<String>> field = fieldValue(Ast.enclosingType(name), id, ctx);
@@ -299,7 +304,7 @@ final class ValueResolver {
             return fieldValue(Ast.enclosingType(field), id, ctx).orElse(Set.of());
         }
         String typeName = Ast.simpleName(field.getScope().toString());
-        return index.type(typeName).flatMap(type -> fieldValue(type, id, ctx)).orElse(Set.of());
+        return index.type(typeName, field).flatMap(type -> fieldValue(type, id, ctx)).orElse(Set.of());
     }
 
     private Set<String> call(MethodCallExpr call, Ctx ctx) {
@@ -310,6 +315,10 @@ final class ValueResolver {
             Set<String> values = new LinkedHashSet<>();
             returns(method).forEach(r -> r.getExpression().ifPresent(e -> values.addAll(strings(e, callee))));
             return values;
+        }
+        Optional<Set<String>> enumGetter = enumConstantGetter(call, ctx);
+        if (enumGetter.isPresent()) {
+            return enumGetter.get();
         }
         String name = call.getNameAsString();
         Optional<Expression> scope = call.getScope();
@@ -329,6 +338,140 @@ final class ValueResolver {
             return strings(scope.get(), ctx);
         }
         return Set.of();
+    }
+
+    /**
+     * Value of a parameter of a {@code @Bean} method, which Spring injects with another bean of the
+     * same configuration: the bean method named like the parameter, else the only one of its type
+     * ({@code Binding binding(Queue orderQueue, DirectExchange orderDirect)}).
+     */
+    private Set<String> beanParameter(CallableDeclaration<?> owner, Parameter param, Ctx ctx) {
+        TypeDeclaration<?> type = Ast.enclosingType(owner);
+        if (type == null || !Ast.hasAnnotation(owner, "Bean")) {
+            return Set.of();
+        }
+        List<MethodDeclaration> beans = type.getMethods().stream()
+                .filter(m -> m != owner && m.getParameters().isEmpty() && Ast.hasAnnotation(m, "Bean"))
+                .toList();
+        List<MethodDeclaration> byName = beans.stream()
+                .filter(m -> m.getNameAsString().equals(param.getNameAsString()))
+                .toList();
+        String paramType = Ast.typeName(param.getType());
+        List<MethodDeclaration> byType = beans.stream()
+                .filter(m -> Ast.typeName(m.getType()).equals(paramType))
+                .toList();
+        List<MethodDeclaration> chosen = !byName.isEmpty() ? byName : byType.size() == 1 ? byType : List.of();
+        Set<String> values = new LinkedHashSet<>();
+        for (MethodDeclaration bean : chosen) {
+            Ctx callee = new Ctx(bean, Map.of(), ctx, null, ctx.depth() + 1);
+            returns(bean).forEach(r -> r.getExpression().ifPresent(e -> values.addAll(strings(e, callee))));
+        }
+        return values;
+    }
+
+    /**
+     * {@code SomeEnum.CONSTANT.getX()} where the getter returns a field the enum constructor sets
+     * from one of its parameters: the argument the constant passes for that parameter.
+     */
+    private Optional<Set<String>> enumConstantGetter(MethodCallExpr call, Ctx ctx) {
+        if (call.getArguments().isNonEmpty()) {
+            return Optional.empty();
+        }
+        Expression scope = call.getScope().orElse(null);
+        if (scope instanceof FieldAccessExpr constantRef) {
+            return enumConstantGetter(constantRef, call, ctx);
+        }
+        // a parameter the callers pass enum constants for: convertAndSend(OrderQueueEnum.QUEUE_ORDER_CREATE, message)
+        if (scope instanceof NameExpr name && Ast.enclosingCallable(name) != null) {
+            BoundArg bound = bound(name.getNameAsString(), Ast.enclosingCallable(name), ctx);
+            if (bound == null) {
+                return Optional.empty();
+            }
+            Set<String> values = new LinkedHashSet<>();
+            boolean any = false;
+            for (Expression e : bound.expressions()) {
+                if (e instanceof FieldAccessExpr constantRef) {
+                    Optional<Set<String>> v = enumConstantGetter(constantRef, call, bound.ctx());
+                    if (v.isPresent()) {
+                        any = true;
+                        values.addAll(v.get());
+                    }
+                }
+            }
+            return any ? Optional.of(values) : Optional.empty();
+        }
+        return Optional.empty();
+    }
+
+    private Optional<Set<String>> enumConstantGetter(FieldAccessExpr constantRef, MethodCallExpr call, Ctx ctx) {
+        Optional<EnumDeclaration> enumType = index.type(Ast.simpleName(constantRef.getScope().toString()), call)
+                .filter(EnumDeclaration.class::isInstance)
+                .map(EnumDeclaration.class::cast);
+        if (enumType.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<EnumConstantDeclaration> constant = enumType.get().getEntries().stream()
+                .filter(e -> e.getNameAsString().equals(constantRef.getNameAsString()))
+                .findFirst();
+        if (constant.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<MethodDeclaration> getter = enumType.get().getMethodsByName(call.getNameAsString()).stream()
+                .filter(m -> m.getParameters().isEmpty())
+                .findFirst();
+        List<String> fields = new ArrayList<>();
+        if (getter.isPresent()) {
+            for (ReturnStmt ret : returns(getter.get())) {
+                Expression e = ret.getExpression().orElse(null);
+                if (e instanceof NameExpr n) {
+                    fields.add(n.getNameAsString());
+                } else if (e instanceof FieldAccessExpr f && f.getScope().isThisExpr()) {
+                    fields.add(f.getNameAsString());
+                }
+            }
+        } else {
+            lombokGetterField(enumType.get(), call.getNameAsString()).ifPresent(fields::add);
+        }
+        if (fields.isEmpty()) {
+            return Optional.empty();
+        }
+        Set<String> values = new LinkedHashSet<>();
+        for (String field : fields) {
+            for (ConstructorDeclaration ctor : enumType.get().getConstructors()) {
+                if (ctor.getParameters().size() != constant.get().getArguments().size()) {
+                    continue;
+                }
+                for (AssignExpr assign : ctor.findAll(AssignExpr.class)) {
+                    Expression target = assign.getTarget();
+                    String assigned = target instanceof FieldAccessExpr f && f.getScope().isThisExpr() ? f.getNameAsString()
+                            : target instanceof NameExpr n ? n.getNameAsString() : null;
+                    if (!field.equals(assigned) || !(assign.getValue() instanceof NameExpr value)) {
+                        continue;
+                    }
+                    for (int i = 0; i < ctor.getParameters().size(); i++) {
+                        if (ctor.getParameter(i).getNameAsString().equals(value.getNameAsString())) {
+                            values.addAll(strings(constant.get().getArgument(i), ctx.detached()));
+                        }
+                    }
+                }
+            }
+        }
+        return Optional.of(values);
+    }
+
+    /**
+     * The field a Lombok getter ({@code @Getter} on the type or the field) named {@code getter}
+     * returns.
+     */
+    private static Optional<String> lombokGetterField(TypeDeclaration<?> type, String getter) {
+        if (!getter.startsWith("get") || getter.length() <= 3) {
+            return Optional.empty();
+        }
+        String field = Character.toLowerCase(getter.charAt(3)) + getter.substring(4);
+        boolean typeLevel = Ast.hasAnnotation(type, "Getter") || Ast.hasAnnotation(type, "Data");
+        return type.getFieldByName(field)
+                .filter(f -> !f.isStatic() && (typeLevel || Ast.hasAnnotation(f, "Getter")))
+                .map(f -> field);
     }
 
     private Optional<Set<String>> fieldValue(TypeDeclaration<?> type, String name, Ctx ctx) {
@@ -361,7 +504,7 @@ final class ValueResolver {
             } else {
                 continue;
             }
-            Optional<Set<String>> value = index.type(typeName).flatMap(type -> fieldValue(type, id, ctx));
+            Optional<Set<String>> value = index.type(typeName, name).flatMap(type -> fieldValue(type, id, ctx));
             if (value.isPresent()) {
                 return value.get();
             }
@@ -514,7 +657,7 @@ final class ValueResolver {
             }
         } else if (scope instanceof NameExpr name) {
             String typeName = declaredType(name).orElse(name.getNameAsString());
-            index.type(typeName).ifPresent(candidates::add);
+            index.type(typeName, call).ifPresent(candidates::add);
         }
         for (TypeDeclaration<?> type : candidates) {
             for (MethodDeclaration method : type.getMethodsByName(call.getNameAsString())) {
