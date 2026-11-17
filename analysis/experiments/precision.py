@@ -47,7 +47,11 @@ def main():
     groups = {'S00': json.load(open(os.path.join(a.out, 'S00', 'report.json'), encoding='utf-8'))['chains']}
     for s in scenarios:
         if s['kind'] in ('vuln', 'negative'):
-            groups[s['id']] = json.load(open(os.path.join(a.out, s['id'], 'report.json'), encoding='utf-8'))['new']
+            report = os.path.join(a.out, s['id'], 'report.json')
+            if not os.path.exists(report):
+                print(f'{s["id"]}: no report yet, skipped', file=sys.stderr)
+                continue
+            groups[s['id']] = json.load(open(report, encoding='utf-8'))['new']
 
     labelled, missing = {}, []
     for sid, chains in groups.items():

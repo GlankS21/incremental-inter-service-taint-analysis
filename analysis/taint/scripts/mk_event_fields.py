@@ -9,6 +9,18 @@ import subprocess
 import sys
 
 JAVAP = os.path.join(os.environ.get('JAVA_HOME', 'C:/Program Files/Java/jdk-24'), 'bin', 'javap')
+
+# Event record components that never hold unvalidated text (TCI-4) are no field sources. Each
+# entry must carry a proof that EVERY construction site of the record passes a validated value:
+# - ProductCreatedEvent.sku: the only production construction is ProductServiceImpl.java:142-143
+#   with saved.getSku(); Product.sku is written only at ProductServiceImpl.java:135 from
+#   request.sku() of the @Valid-bound ProductRequest (ProductController.java:112) whose sku
+#   carries @Pattern(ValidationPatterns.SKU) = ^[A-Z0-9][A-Z0-9-]{2,63}$ (ProductRequest.java:22).
+#   (The constructions in the tests are not part of the analysed build.)
+EXCLUDED_FIELDS = {
+    'com.shop.common.event.ProductCreatedEvent': ['sku'],
+}
+
 common, out_sources, out_sinks = sys.argv[1:4]
 pkg = os.path.join(common, 'com', 'shop', 'common', 'event')
 sources, sinks = [], []
@@ -21,7 +33,8 @@ for f in sorted(os.listdir(pkg)):
         continue
     fields = re.findall(r'private final (\S+) (\w+);', out)
     for ftype, name in fields:
-        if not ftype.startswith('java.util.List'):  # list elements are covered by their own record
+        # list elements are covered by their own record; excluded components are validated everywhere
+        if not ftype.startswith('java.util.List') and name not in EXCLUDED_FIELDS.get(cls, []):
             sources.append(f'  - {{ kind: field, field: "<{cls}: {ftype} {name}>" }}')
     erased = ','.join(re.sub(r'<.*>', '', t) for t, _ in fields)
     for i, (ftype, name) in enumerate(fields):
