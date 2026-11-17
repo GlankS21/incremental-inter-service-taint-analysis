@@ -59,9 +59,11 @@ def method_cmd(out, services, xmx, gc):
     (svc, (apps, libs)), = services.items()
     libfile = os.path.join(out, 'libjars.txt')
     open(libfile, 'w', encoding='utf-8').write('\n'.join(libs) + '\n')
-    plugins = 'vkr.plugin.ListenerEntryPoints,vkr.plugin.StringParamSources,vkr.plugin.ChannelArgSink'
+    plugins = ('vkr.plugin.ListenerEntryPoints,vkr.plugin.StringParamSources,vkr.plugin.ChannelArgSink,'
+               'vkr.plugin.ReachableClasses')
     return [os.path.join(JAVA_HOME, 'bin', 'java'), f'-Xmx{xmx}', '-Xss512m', f'-Xlog:gc:file={gc}',
             f'-Dvkr.plugins={plugins}', '-Dvkr.channelSinks=true', '-Dvkr.listenerTaint=true',
+            f'-Dvkr.reachableClasses={os.path.join(out, "reachable-classes.txt")}',
             '-cp', f'{os.path.join(TAINT, "launcher", "classes")};{MICANS_JAR}', 'vkr.MicansTaintMain',
             svc, ','.join(apps), '@' + libfile, os.path.join(TAINT, 'config', 'micans-benchmark.yml'),
             os.path.join(out, 'tai-e'), 'ci']
@@ -105,19 +107,23 @@ def main():
     a = ap.parse_args()
     cps = classpaths(a.bench, a.system)
     method = a.per_service_method
-    rows = [run(a.bench, a.system, a.jre_home, 'whole', cps, a.xmx)] if not (a.only or method) else []
+    path = os.path.join(a.bench, 'runs' + ('-method' if method else ''), a.system, 'runs.csv')
+
+    def record(row):
+        # a row is written as soon as its run ends, so an interrupted batch keeps the finished runs
+        new = not os.path.exists(path)
+        with open(path, 'a', newline='', encoding='utf-8') as f:
+            w = csv.DictWriter(f, fieldnames=list(row))
+            if new:
+                w.writeheader()
+            w.writerow(row)
+        print(row, flush=True)
+
+    if not (a.only or method):
+        record(run(a.bench, a.system, a.jre_home, 'whole', cps, a.xmx))
     if not a.whole_only:
         for svc in (a.only.split(',') if a.only else cps):
-            rows.append(run(a.bench, a.system, a.jre_home, svc, {svc: cps[svc]}, a.xmx, method))
-    path = os.path.join(a.bench, 'runs' + ('-method' if method else ''), a.system, 'runs.csv')
-    new = not os.path.exists(path)
-    with open(path, 'a', newline='', encoding='utf-8') as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0]))
-        if new:
-            w.writeheader()
-        w.writerows(rows)
-    for r in rows:
-        print(r)
+            record(run(a.bench, a.system, a.jre_home, svc, {svc: cps[svc]}, a.xmx, method))
 
 
 if __name__ == '__main__':
