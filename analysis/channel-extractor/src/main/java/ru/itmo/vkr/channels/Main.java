@@ -48,10 +48,11 @@ public final class Main {
         } else {
             writer.writeValue(out.toFile(), model);
         }
-        System.err.printf("services=%d endpoints=%d httpClients=%d publishers=%d bindings=%d listeners=%d "
+        System.err.printf("services=%d endpoints=%d httpClients=%d publishers=%d bindings=%d deadLetters=%d listeners=%d "
                         + "channels=%d unresolved=%d warnings=%d%n",
                 model.services().size(), model.endpoints().size(), model.httpClients().size(),
-                model.publishers().size(), model.bindings().size(), model.listeners().size(),
+                model.publishers().size(), model.bindings().size(), model.deadLetters().size(),
+                model.listeners().size(),
                 model.channels().size(), model.unresolved().size(), model.warnings().size());
     }
 
