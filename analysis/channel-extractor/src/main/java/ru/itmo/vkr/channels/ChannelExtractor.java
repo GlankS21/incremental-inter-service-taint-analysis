@@ -1,6 +1,7 @@
 package ru.itmo.vkr.channels;
 
 import ru.itmo.vkr.channels.model.ChannelModel;
+import ru.itmo.vkr.channels.model.DeadLetter;
 import ru.itmo.vkr.channels.model.Endpoint;
 import ru.itmo.vkr.channels.model.HttpClientMethod;
 import ru.itmo.vkr.channels.model.Listener;
@@ -55,6 +56,7 @@ public final class ChannelExtractor {
         List<HttpClientMethod> clients = new ArrayList<>();
         List<Publisher> publishers = new ArrayList<>();
         List<QueueBinding> bindings = new ArrayList<>();
+        List<DeadLetter> deadLetters = new ArrayList<>();
         List<Listener> listeners = new ArrayList<>();
         List<Unresolved> unresolved = new ArrayList<>();
         for (SourceIndex.Module service : index.services()) {
@@ -66,15 +68,16 @@ public final class ChannelExtractor {
             AmqpExtractor.Result amqpResult = amqp.extract(service);
             publishers.addAll(amqpResult.publishers());
             bindings.addAll(amqpResult.bindings());
+            deadLetters.addAll(amqpResult.deadLetters());
             listeners.addAll(amqpResult.listeners());
             unresolved.addAll(amqpResult.unresolved());
         }
 
         ChannelLinker.Result links = new ChannelLinker()
-                .link(services, endpoints, clients, publishers, bindings, listeners);
+                .link(services, endpoints, clients, publishers, bindings, deadLetters, listeners);
         unresolved.addAll(links.unresolved());
         return new ChannelModel(root.toString(), gatewayFile == null ? null : root.relativize(gatewayFile).toString(),
-                services, endpoints, clients, publishers, bindings, listeners, links.channels(), unresolved,
+                services, endpoints, clients, publishers, bindings, deadLetters, listeners, links.channels(), unresolved,
                 warnings);
     }
 
