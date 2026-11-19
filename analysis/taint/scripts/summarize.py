@@ -28,11 +28,27 @@ SINK_CALL = re.compile(r'^<([^:]+): \S+ ([^(]+)\([^)]*\)>\[\d+@L(-?\d+)\] (.*)/(
 STORE_FIELD = re.compile(r'^<([^:]+): \S+ (\w+)>$')
 # Tai-e prints a constructor call as `$r5.<init>($r6, ...)`, without the class
 CTOR_CALL = re.compile(r'invokespecial \S+\.<init>\(([^)]*)\)')
-JAVAP = os.path.join(os.environ.get('JAVA_HOME', 'C:/Program Files/Java/jdk-24'), 'bin', 'javap')
-APP_PACKAGE = 'com.shop.'
-EVENT_PACKAGE = 'com.shop.common.event.'
+if not os.environ.get('JAVA_HOME'):
+    sys.exit('summarize.py: JAVA_HOME is not set (a JDK home, for javap)')
+JAVAP = os.path.join(os.environ['JAVA_HOME'], 'bin', 'javap')
+# What gen_taint_config.py discovered for the service (VKR_DISCOVERY, set by incremental.py): the
+# project's packages, event and entity classes and the outbox enqueue methods. Without it the testbed's
+# layout is assumed (com.shop., events in com.shop.common.event, entities in *.entity.*, enqueue).
+DISCOVERY = json.load(open(os.environ['VKR_DISCOVERY'], encoding='utf-8')) if os.environ.get('VKR_DISCOVERY') else {}
+APP_PACKAGES = tuple(p + '.' for p in DISCOVERY.get('appPackages', [])) or ('com.shop.',)
+EVENT_PACKAGES = [p + '.' for p in DISCOVERY.get('eventPackages', [])] or ['com.shop.common.event.']
+ENTITY_CLASSES = set(DISCOVERY.get('entityClasses', []))
+OUTBOX_METHODS = {m for _, m in DISCOVERY.get('outboxSinks', [])} or {'enqueue'}
 LOGGER_CALL = re.compile(r'\.(trace|debug|info|warn|error)\(')
-SQL_CALL = re.compile(r'\.(createNativeQuery|createQuery|query\w*|update)\(')
+SQL_CALL = re.compile(r'\.(createNativeQuery|createQuery|query\w*|update|execute)\(')
+
+
+def is_entity(cls):
+    return cls in ENTITY_CLASSES if ENTITY_CLASSES else '.entity.' in cls
+
+
+def is_event(cls):
+    return any(cls.startswith(p) for p in EVENT_PACKAGES)
 
 _javap_cache = {}
 
@@ -96,9 +112,9 @@ def summary(service, log_path, model_path, out_path, app_dir, common_dir):
 
     def field_entries(cls):
         """Field sources are not tied to one handler: map the DTO / event to the entries taking it."""
-        if '.entity.' in cls:
+        if is_entity(cls):
             return [f'db:{service}:{cls.rsplit(".", 1)[1]}']  # read back from the database
-        if cls.startswith(EVENT_PACKAGE):
+        if is_event(cls):
             names = roots(common_dir, cls)
             return [l['id'] for l in listeners if l['payloadType'] in names]
         names = roots(app_dir, cls)
@@ -111,8 +127,9 @@ def summary(service, log_path, model_path, out_path, app_dir, common_dir):
         a record of that arity that is (or is nested in) the payload of a publisher of site_cls."""
         nonlocal event_classes
         if event_classes is None:
-            pkg = os.path.join(common_dir, *EVENT_PACKAGE.rstrip('.').split('.'))
-            event_classes = [EVENT_PACKAGE + f[:-6] for f in os.listdir(pkg)
+            event_classes = [p + f[:-6] for p in EVENT_PACKAGES
+                             if os.path.isdir(os.path.join(common_dir, *p.rstrip('.').split('.')))
+                             for f in os.listdir(os.path.join(common_dir, *p.rstrip('.').split('.')))
                              if f.endswith('.class') and '$' not in f]
         local = [p for p in publishers if p['origin']['className'] == site_cls]
         same = [p for p in local if p['origin']['method'] == site_method]
@@ -162,7 +179,7 @@ def summary(service, log_path, model_path, out_path, app_dir, common_dir):
             continue
         sink_cls, sink_m, sink_line, call, sink_idx = m.groups()
         sink_line = int(sink_line)
-        if not sink_cls.startswith(APP_PACKAGE):
+        if not sink_cls.startswith(APP_PACKAGES):
             dropped += 1  # sink call site inside a library: not part of the service contract
             continue
         site = f'{sink_cls.rsplit(".", 1)[1]}#{sink_m}:{sink_line}'
@@ -177,7 +194,7 @@ def summary(service, log_path, model_path, out_path, app_dir, common_dir):
                           for p in event_publishers(event_cls, sink_cls, sink_m, sink_line)]
         elif (sink_cls, sink_m, callee) in clients:
             exits = [{'kind': 'CHANNEL', 'channel': clients[(sink_cls, sink_m, callee)]['id'], 'arg': sink_idx}]
-        elif callee == 'enqueue':
+        elif callee in OUTBOX_METHODS:
             pubs = [p for p in publishers if p['origin']['className'] == sink_cls
                     and p['origin']['method'] == sink_m]
             exits = [{'kind': 'CHANNEL', 'channel': min(pubs, key=lambda p: abs(p['origin']['line'] - sink_line))['id'],

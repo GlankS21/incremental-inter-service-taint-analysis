@@ -5,22 +5,13 @@ A helper such as Order.truncate(reason) has one call site under 1-call context s
 every string passed through it is merged into one return value and flows back to all callers.
 The helper's parameter is sanitized (taint does not enter its body) and a transfer from the
 argument to the result is applied at each call site, in the caller's context instead.
-usage: mk_db_config.py <field.yml> <entity-sources.yml> <out.yml>"""
+usage: mk_db_config.py <field.yml> <entity-sources.yml> <out.yml> [<helpers.json>]
+The helpers are the project's `call-site-helpers:` of the overrides file (a JSON list of method
+signatures, written by vkr_prepare.py); without the file no application helper is summarised."""
+import json
 import sys
 
-HELPERS = [
-    '<com.shop.common.util.TextUtils: java.lang.String truncate(java.lang.String,int)>',
-    '<com.shop.common.util.CorrelationIdUtils: java.lang.String resolveOrGenerate(java.lang.String)>',
-    '<com.shop.order.entity.Order: java.lang.String truncate(java.lang.String)>',
-    '<com.shop.order.entity.Coupon: java.lang.String normalizeCode(java.lang.String)>',
-    '<com.shop.order.messaging.outbox.OutboxPublisher: java.lang.String truncate(java.lang.String)>',
-    '<com.shop.order.repository.CouponSpecifications: java.lang.String escapeLike(java.lang.String)>',
-    '<com.shop.order.repository.OrderSpecifications: java.lang.String escapeLike(java.lang.String)>',
-    '<com.shop.inventory.messaging.outbox.OutboxPublisher: java.lang.String truncate(java.lang.String)>',
-    '<com.shop.inventory.service.impl.StockReservationServiceImpl: java.lang.String truncate(java.lang.String)>',
-    '<com.shop.payment.messaging.outbox.OutboxPublisher: java.lang.String truncate(java.lang.String)>',
-    '<com.shop.payment.gateway.yookassa.YooKassaPaymentGateway: java.lang.String truncate(java.lang.String)>',
-]
+HELPERS = json.load(open(sys.argv[4], encoding='utf-8')) if len(sys.argv) > 4 else []
 
 # JDK String methods that return their receiver (or argument) through an internal helper with a
 # single call site, e.g. toUpperCase -> StringLatin1.toUpperCase(this, ...) returns `this` when

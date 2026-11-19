@@ -1,15 +1,26 @@
 #!/bin/sh
-# Builds work/ for the given services: the JRE model, the extracted application and library
-# classes, and the generated taint configs (coarse -> field-level -> database channel).
-# usage: prepare.sh <service>...        e.g. prepare.sh cart-service order-service inventory-service
-# env: JAVA_HOME (JDK 24 whose modules form the JRE model), ECOMMERCE (backend dir with built jars),
+# Builds the class layout of work/ for one service: the JRE model (once) and the service's extracted
+# application and library classes. The taint configs of the workdir are generated afterwards by
+# vkr_prepare.py (which calls this script with the paths vkr_config.py resolved from vkr-taint.yml).
+# usage: prepare.sh <service> <classes dir> <spring boot jar>
+#        prepare.sh --jre-only
+# env: JAVA_HOME (required: JDK whose modules form the JRE model), VKR_SHARED_JARS (comma-separated
+#      artifact names of the project's shared modules, extracted as application code),
 #      VKR_WORK (work dir, default work/; keep it out of synced folders such as OneDrive)
 set -e
 T=$(cd "$(dirname "$0")/.." && pwd)
-JAVA_HOME=${JAVA_HOME:-"C:/Program Files/Java/jdk-24"}
-ECOMMERCE=${ECOMMERCE:-"$T/../../ecommerce/backend"}
+: "${JAVA_HOME:?JAVA_HOME is not set (a JDK home; vkr-taint.yml toolchain.java-home)}"
 export JAVA_HOME
 K=${VKR_WORK:-"$T/work"}
+if [ "$1" != "--jre-only" ]; then
+    svc=$1
+    CLASSES=$2
+    JAR=$3
+    [ -n "$svc" ] && [ -d "$CLASSES" ] && [ -f "$JAR" ] || {
+        echo "usage: prepare.sh <service> <classes dir> <spring boot jar> (got '$svc' '$CLASSES' '$JAR')" >&2
+        exit 2
+    }
+fi
 mkdir -p "$K"
 
 # JRE model: JDK classes downgraded to class version 61 for Micans' ASM 9.4, packed where Tai-e
@@ -34,27 +45,14 @@ os.replace(tmp, rt)
 print('replaced', name)
 EOF
 fi
+[ "$1" = "--jre-only" ] && exit 0
 
-for svc in "$@"; do
-    x=${svc%-service}
-    W="$K/$svc"
-    if [ ! -d "$W/app" ]; then
-        rm -rf "$W"
-        mkdir -p "$W/bootjar"
-        cp -r "$ECOMMERCE/$svc/target/classes" "$W/app"
-        (cd "$W/bootjar" && unzip -q "$ECOMMERCE/$svc/target/$svc.jar" 'BOOT-INF/lib/*')
-        python -I "$T/scripts/prep_micans.py" "$W"
-    fi
-    # event records are shared through common-lib: same field config for every service
-    [ -f "$K/event-sources.yml" ] || (cd "$K" && python -I "$T/scripts/mk_event_fields.py" "$W/common" event-sources.yml event-sinks.yml)
-    base="$T/config/taint-$x.yml"
-    if [ -d "$W/app/com/shop/$x/dto/request" ] && grep -q 'mk_dto_fields' "$base"; then
-        python -I "$T/scripts/mk_dto_fields.py" "$W/app" "com.shop.$x.dto.request" "$base" "$W/taint-coarse.yml"
-    else
-        cp "$base" "$W/taint-coarse.yml"
-    fi
-    (cd "$K" && python -I "$T/scripts/mk_field_config.py" "$W/taint-coarse.yml" "$W/taint-field.yml")
-    python -I "$T/scripts/mk_entity_fields.py" "$W/app" "com.shop.$x.entity" "$W/entity-sources.yml"
-    python -I "$T/scripts/mk_db_config.py" "$W/taint-field.yml" "$W/entity-sources.yml" "$W/taint-db.yml"
-    echo "$svc: $W/taint-db.yml"
-done
+W="$K/$svc"
+if [ ! -d "$W/app" ]; then
+    rm -rf "$W"
+    mkdir -p "$W/bootjar"
+    cp -r "$CLASSES" "$W/app"
+    (cd "$W/bootjar" && unzip -q "$JAR" 'BOOT-INF/lib/*')
+    python -I "$T/scripts/prep_micans.py" "$W"
+fi
+echo "$svc: $W"

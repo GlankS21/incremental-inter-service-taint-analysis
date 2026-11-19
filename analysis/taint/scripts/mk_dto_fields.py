@@ -1,22 +1,23 @@
 """Field sources for the request DTOs of a service: every non-list `private final` field of the
-classes in its request-DTO package, nested ones included (e.g. CreateOrderRequest.items[*].productId).
+classes in its request-DTO packages, nested ones included (e.g. CreateOrderRequest.items[*].productId).
 Inserted into the service's base config before `sinks:`.
-usage: mk_dto_fields.py <app classes> <dto package> <config.yml> <out.yml>"""
+usage: mk_dto_fields.py <app classes> <dto package>[,<package>...] <config.yml> <out.yml>
+(the packages come from the discovery of gen_taint_config.py: those of the request-body types)"""
 import os
 import re
 import subprocess
 import sys
 
-JAVAP = os.path.join(os.environ.get('JAVA_HOME', 'C:/Program Files/Java/jdk-24'), 'bin', 'javap')
+if not os.environ.get('JAVA_HOME'):
+    sys.exit(f'{os.path.basename(__file__)}: JAVA_HOME is not set (a JDK home, for javap)')
+JAVAP = os.path.join(os.environ['JAVA_HOME'], 'bin', 'javap')
 
-app, pkg, src, out = sys.argv[1:5]
+app, pkgs, src, out = sys.argv[1:5]
 lines = ['  # request DTOs are only built by deserialising the HTTP body, so every scalar field of a',
          '  # nested DTO (e.g. CreateOrderRequest.items[*].productId) is attacker-controlled']
-pkg_dir = os.path.join(app, *pkg.split('.'))
-for f in sorted(os.listdir(pkg_dir)):
-    if not f.endswith('.class'):
-        continue
-    cls = f'{pkg}.{f[:-6]}'
+classes = [f'{pkg}.{f[:-6]}' for pkg in pkgs.split(',') if pkg
+           for f in sorted(os.listdir(os.path.join(app, *pkg.split('.')))) if f.endswith('.class')]
+for cls in classes:
     text = subprocess.run([JAVAP, '-p', '-cp', app, cls], capture_output=True, text=True).stdout
     for typ, name in re.findall(r'^\s*private final (\S+) ([a-zA-Z0-9]+);', text, re.M):
         if 'java.util.List' not in typ:

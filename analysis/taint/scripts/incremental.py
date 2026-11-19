@@ -1,15 +1,23 @@
 """Incremental inter-service taint analysis (ADR-001, option B).
 
 Each service is re-analysed only when something its Micans run reads has changed. Two cache levels:
-  run key     = hash(service classes, common-lib classes, library jars, base config, config
-                generators, launcher, Micans jar, JDK, context sensitivity)  -> taint/store flows
+  run key     = hash(service classes, shared-module classes, library jars, base config (generated
+                from the channel model and the bytecode, or hand-written), discovery, overrides,
+                config generators, launcher, Micans jar, JDK, context sensitivity) -> taint/store flows
   summary key = hash(run key, channel model, summarize.py)                   -> summary.json
 Composition is cheap and always recomputed from the summaries; its chains to a sink are compared
 with a baseline report, and new chains fail the run with --gate.
 
-usage: incremental.py [--services a,b,c] [--model channels.json] [--baseline report.json]
-                      [--out report.json] [--gate]
-env:   ECOMMERCE (backend dir with built jars), MICANS_JAR, JAVA_HOME, VKR_WORK (default work/)
+Everything project-specific comes from vkr-taint.yml (vkr_config.py): services, shared modules,
+toolchain (JDK, Micans jar), context sensitivity, heap, world cache, gate. The project must be built
+(target/classes and the Spring Boot jar of each service); the tool does not build.
+
+usage: incremental.py [--config vkr-taint.yml] [--services a,b,c] [--model channels.json]
+                      [--baseline report.json] [--out report.json] [--gate | --no-gate]
+       --config defaults to $VKR_CONFIG, else vkr-taint.yml in the current directory or a parent;
+       --model defaults to a fresh channel-extractor run on project.root ($VKR_CHANNEL_EXTRACTOR or
+       analysis/channel-extractor/target/channel-extractor-0.1.0-SNAPSHOT.jar)
+env:   VKR_WORK (default work/), plus the variables vkr-taint.yml references
 """
 import argparse
 import hashlib
@@ -23,17 +31,19 @@ import sys
 import time
 import zipfile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import vkr_config  # noqa: E402
+import vkr_prepare  # noqa: E402
+
 T = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORK = os.environ.get('VKR_WORK', os.path.join(T, 'work'))
 CACHE = os.path.join(WORK, 'cache')
-ECOMMERCE = os.environ.get('ECOMMERCE', os.path.join(T, '..', '..', 'ecommerce', 'backend'))
-JAVA_HOME = os.environ.get('JAVA_HOME', 'C:/Program Files/Java/jdk-24')
-MICANS_JAR = os.environ.get('MICANS_JAR', 'C:/Users/asgat/OneDrive/Máy tính/WorkSpace/ITMO - Thsi/'
-                            'vkr-artifacts/miscans/src-extract/micans-source/build/micans.jar')
-CS = '1-call'
-SERVICES = ['cart-service', 'order-service', 'inventory-service', 'payment-service']
+EXTRACTOR_JAR = os.environ.get('VKR_CHANNEL_EXTRACTOR') or os.path.join(
+    T, '..', 'channel-extractor', 'target', 'channel-extractor-0.1.0-SNAPSHOT.jar')
 CONFIG_SCRIPTS = ['prepare.sh', 'prep_micans.py', 'pack_jre.py', 'mk_dto_fields.py', 'mk_event_fields.py',
-                  'mk_field_config.py', 'mk_entity_fields.py', 'mk_db_config.py', 'run_taint.sh']
+                  'mk_field_config.py', 'mk_entity_fields.py', 'mk_db_config.py', 'run_taint.sh',
+                  'gen_taint_config.py', 'vkr_prepare.py', 'vkr_config.py', 'vkr_yaml.py']
+CFG = None  # the loaded vkr-taint.yml (main)
 FLOW_PREFIXES = ('TaintFlow{', 'StoreFlow{')
 
 
@@ -70,26 +80,34 @@ def jar_classes(h, name, data):
                 h.part(f'{name}!{e.filename}', e.CRC.to_bytes(4, 'big'))
 
 
-def run_key(svc):
-    x = svc[:-len('-service')]
+def is_shared_jar(name):
+    return any(name == f'{m["artifact"]}.jar' or name.startswith(f'{m["artifact"]}-') for m in CFG['shared'])
+
+
+def run_key(svc, base, discovery):
+    m = vkr_prepare.module(CFG, svc)
     h = Hasher()
-    h.tree('app', os.path.join(ECOMMERCE, svc, 'target', 'classes'), '.class')
-    with zipfile.ZipFile(os.path.join(ECOMMERCE, svc, 'target', f'{svc}.jar')) as boot:
+    h.tree('app', m['classes'], '.class')
+    with zipfile.ZipFile(m['jar']) as boot:
         for e in sorted(boot.infolist(), key=lambda e: e.filename):
             if not (e.filename.startswith('BOOT-INF/lib/') and e.filename.endswith('.jar')):
                 continue
-            if os.path.basename(e.filename).startswith('common-lib'):
+            if is_shared_jar(os.path.basename(e.filename)):
                 jar_classes(h, 'common', boot.read(e))  # built with the services: content only
             else:
                 h.part(e.filename, e.CRC.to_bytes(4, 'big'))  # released artifact: the jar itself
-    h.file('config', os.path.join(T, 'config', f'taint-{x}.yml'))
+    # the base config is generated from the channel model: its text, not the model, is the input
+    h.file('config', base)
+    h.file('discovery', discovery)
+    if CFG['taint']['overrides']:
+        h.file('overrides', CFG['taint']['overrides'])
     for s in CONFIG_SCRIPTS:
         h.file(s, os.path.join(T, 'scripts', s))
     h.tree('launcher', os.path.join(T, 'launcher', 'src'), '.java')
     h.tree('jdk-stubs', os.path.join(T, 'jdk-stubs'), '.java')
-    h.file('micans', MICANS_JAR)
-    h.file('jdk', os.path.join(JAVA_HOME, 'release'))
-    h.part('cs', CS.encode())
+    h.file('micans', CFG['toolchain']['micans_jar'])
+    h.file('jdk', os.path.join(CFG['toolchain']['java_home'], 'release'))
+    h.part('cs', CFG['analysis']['context'].encode())
     return h.hexdigest()
 
 
@@ -108,38 +126,38 @@ def summary_key(rkey, model):
 
 
 def sh(*args, **kw):
-    subprocess.run(['sh', *args], check=True, **kw)
+    subprocess.run(['sh', *args], check=True, env=vkr_prepare.tool_env(CFG), **kw)
 
 
 def compile_launcher():
     src = os.path.join(T, 'launcher', 'src')
     files = [os.path.join(d, f) for d, _, fs in os.walk(os.path.join(src, 'vkr')) for f in fs if f.endswith('.java')]
-    subprocess.run([os.path.join(JAVA_HOME, 'bin', 'javac'), '--release', '17', '-nowarn', '-cp', MICANS_JAR,
-                    '-d', os.path.join(T, 'launcher', 'classes'), *files], check=True)
+    subprocess.run([os.path.join(CFG['toolchain']['java_home'], 'bin', 'javac'), '--release', '17', '-nowarn',
+                    '-cp', CFG['toolchain']['micans_jar'], '-d', os.path.join(T, 'launcher', 'classes'), *files],
+                   check=True)
 
 
-def prepare(svc, rkey):
+def prepare(svc, rkey, base, discovery):
     """Fresh workdir (classes and generated configs) for the commit whose run key is rkey."""
     w = os.path.join(WORK, svc)
     marker = os.path.join(w, '.runkey')
     if os.path.exists(marker) and open(marker).read() == rkey:
         return w
     shutil.rmtree(w, ignore_errors=True)
-    for f in ('event-sources.yml', 'event-sinks.yml'):  # derived from common-lib, which may have changed
-        if os.path.exists(os.path.join(WORK, f)):
-            os.remove(os.path.join(WORK, f))
-    sh(os.path.join(T, 'scripts', 'prepare.sh'), svc)
+    vkr_prepare.layout(CFG, svc)
+    vkr_prepare.taint_configs(CFG, svc, w, base, discovery)
+    shutil.copyfile(discovery, os.path.join(w, 'discovery.json'))
     with open(marker, 'w') as f:
         f.write(rkey)
     return w
 
 
-def analyse(svc, rkey, flows_path):
+def analyse(svc, rkey, flows_path, base, discovery):
     """Micans run on a fresh workdir; keeps only the flow lines of the log."""
-    w = prepare(svc, rkey)
+    w = prepare(svc, rkey, base, discovery)
     log = os.path.join(w, 'run.log')
     sh(os.path.join(T, 'scripts', 'run_taint.sh'), svc, w, os.path.join(w, 'taint-db.yml'),
-       os.path.join(w, 'out'), log, CS)
+       os.path.join(w, 'out'), log, CFG['analysis']['context'])
     with open(log, encoding='utf-8', errors='replace') as f:
         lines = f.read().splitlines()
     if not lines or not lines[-1].startswith('exit=0'):
@@ -150,47 +168,85 @@ def analyse(svc, rkey, flows_path):
     os.replace(flows_path + '.tmp', flows_path)
 
 
-def summarize(svc, rkey, flows_path, model, out):
-    w = prepare(svc, rkey)  # flows may come from the cache while the workdir holds another commit
+def summarize(svc, rkey, flows_path, model, out, base, discovery):
+    w = prepare(svc, rkey, base, discovery)  # flows may come from the cache while the workdir holds another commit
+    env = {**vkr_prepare.tool_env(CFG), 'VKR_DISCOVERY': os.path.join(w, 'discovery.json')}
     subprocess.run([sys.executable, '-I', os.path.join(T, 'scripts', 'summarize.py'), 'summary', svc, flows_path,
                     model, out + '.tmp', os.path.join(w, 'app'), os.path.join(w, 'common')],
-                   check=True, stdout=subprocess.DEVNULL)
+                   check=True, stdout=subprocess.DEVNULL, env=env)
     os.replace(out + '.tmp', out)
 
 
+def extract_model(out):
+    """Channel model of project.root by channel-extractor (reads sources only, takes seconds)."""
+    if not os.path.isfile(EXTRACTOR_JAR):
+        sys.exit(f'vkr-taint: channel-extractor jar not found: {EXTRACTOR_JAR} '
+                 f'(build analysis/channel-extractor, set VKR_CHANNEL_EXTRACTOR, or pass --model)')
+    args = [os.path.join(CFG['toolchain']['java_home'], 'bin', 'java'), '-jar', EXTRACTOR_JAR, CFG['root'],
+            '--out', out]
+    if CFG['gateway_config']:
+        args += ['--gateway-config', CFG['gateway_config']]
+    subprocess.run(args, check=True, stdout=subprocess.DEVNULL)
+    return out
+
+
 def main():
+    global CFG
     ap = argparse.ArgumentParser()
-    ap.add_argument('--services', default=','.join(SERVICES))
-    ap.add_argument('--model', default=os.path.join(T, '..', 'channel-extractor', 'target', 'ecommerce-channels.json'))
-    ap.add_argument('--baseline')
+    ap.add_argument('--config', help='vkr-taint.yml (default: $VKR_CONFIG or ./vkr-taint.yml)')
+    ap.add_argument('--services', help='subset of the configured services')
+    ap.add_argument('--model', help='channel model (default: extracted from project.root)')
+    ap.add_argument('--baseline', help='report to compare with (default: gate.baseline when it exists)')
     ap.add_argument('--out', default=os.path.join(WORK, 'report.json'))
-    ap.add_argument('--gate', action='store_true')
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument('--gate', action='store_true', help='exit 1 on new chains (default: gate.fail-on)')
+    g.add_argument('--no-gate', action='store_true')
     a = ap.parse_args()
+    try:
+        CFG = vkr_config.load(a.config, require=('java', 'micans', 'artifacts'))
+    except vkr_config.ConfigError as e:
+        sys.exit(f'vkr-taint: {e}')
+    for n in CFG['notes']:
+        print(f'note: {n}')
+    services = a.services.split(',') if a.services else [m['name'] for m in CFG['services']]
+    try:
+        for svc in services:
+            vkr_prepare.module(CFG, svc)
+    except vkr_config.ConfigError as e:
+        sys.exit(f'vkr-taint: {e}')
+    if a.baseline is None and CFG['gate']['baseline'] and os.path.isfile(CFG['gate']['baseline']):
+        a.baseline = CFG['gate']['baseline']
+    gate = a.gate or (CFG['gate']['fail_on'] == 'new-chains' and not a.no_gate)
     start = time.time()
+    os.makedirs(WORK, exist_ok=True)
+    model = a.model or extract_model(os.path.join(WORK, 'channels.json'))
+    model_json = json.load(open(model, encoding='utf-8'))
     compile_launcher()
     report = {'services': {}}
     summaries = []
-    for svc in a.services.split(','):
+    for svc in services:
         t0 = time.time()
-        rkey = run_key(svc)
+        base, discovery = vkr_prepare.base_config(CFG, model_json, svc, os.path.join(WORK, 'gen', svc))
+        rkey = run_key(svc, base, discovery)
         d = os.path.join(CACHE, svc, rkey[:16])
         os.makedirs(d, exist_ok=True)
         flows = os.path.join(d, 'flows.txt')
         hit_run = os.path.exists(flows)
         if not hit_run:
-            analyse(svc, rkey, flows)
-        skey = summary_key(rkey, a.model)
+            analyse(svc, rkey, flows, base, discovery)
+        skey = summary_key(rkey, model)
         summary = os.path.join(d, f'summary-{skey[:16]}.json')
         hit_summary = os.path.exists(summary)
         if not hit_summary:
-            summarize(svc, rkey, flows, a.model, summary)
+            summarize(svc, rkey, flows, model, summary, base, discovery)
         summaries.append(summary)
         report['services'][svc] = {'runKey': rkey[:16], 'runCached': hit_run, 'summaryCached': hit_summary,
                                    'seconds': round(time.time() - t0, 1)}
         print(f'{svc}: run {"hit" if hit_run else "miss"}, summary {"hit" if hit_summary else "miss"}, '
               f'{time.time() - t0:.0f} s', flush=True)
     composed = subprocess.run([sys.executable, '-I', os.path.join(T, 'scripts', 'summarize.py'), 'compose',
-                               a.model, *summaries], check=True, capture_output=True, text=True).stdout
+                               model, *summaries], check=True, capture_output=True, text=True,
+                              env=vkr_prepare.tool_env(CFG)).stdout
     chains = sorted({l for l in composed.splitlines() if 'CWE-' in l})
     report['chains'] = chains
     report['seconds'] = round(time.time() - start, 1)
@@ -209,7 +265,7 @@ def main():
           + f'; {report["seconds"]:.0f} s total -> {a.out}')
     for c in new:
         print('NEW', c)
-    if a.gate and new:
+    if gate and new:
         sys.exit(1)
 
 

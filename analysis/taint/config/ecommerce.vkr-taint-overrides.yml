@@ -1,0 +1,50 @@
+# Testbed-specific additions to the generated taint configs (Tai-e taint-config format), merged last.
+# Top-level sources/sinks/transfers/sanitizers apply to every service, `services:` to one service.
+# `exclusions:` and `call-site-helpers:` are vkr-taint extensions; each entry must carry a reason.
+
+services:
+  payment-service:
+    transfers:
+      # the YooKassa webhook body is parsed into the provider's notification records; the taint takes
+      # the notification type, a taint of the declared type Object is dropped by the cast that follows
+      # (the other call site, OutboxPublisher reading its own rows back, needs no taint)
+      - { method: "<com.fasterxml.jackson.databind.ObjectMapper: java.lang.Object readValue(java.lang.String,java.lang.Class)>", from: 0, to: result, type: "com.shop.payment.gateway.yookassa.dto.YooKassaNotification" }
+      - { method: "<com.shop.payment.gateway.yookassa.dto.*: * *()>", from: base, to: result }
+
+# Fields that never hold unvalidated text (TCI-4) are no field sources (moved from mk_entity_fields.py
+# and mk_event_fields.py; the proof shows that EVERY writer of the field passes through validation).
+exclusions:
+  - field: "<com.shop.order.entity.Coupon: java.lang.String code>"
+    reason: >-
+      written only at CouponServiceImpl.java:62,82 (coupon.setCode(code)) from
+      Coupon.normalizeCode(request.code()) at CouponServiceImpl.java:57,78; CouponRequest.code carries
+      @Pattern(Coupon.CODE_PATTERN) = ^[A-Za-z0-9_-]{3,30}$ and both controller methods bind the
+      request @Valid (AdminCouponController.java:66,73)
+  - field: "<com.shop.order.entity.Order: java.lang.String couponCode>"
+    reason: >-
+      written only in Order.applyCoupon (Order.java:163; Order.java:147 sets it null); its sole caller
+      is OrderServiceImpl.java:110, passing applied.getCode() of a Coupon loaded from the repository,
+      whose code is validated as Coupon.code. (Coupon.description must stay a source: the V05 chain
+      reads it back from the database.)
+  - field: "<com.shop.common.event.ProductCreatedEvent: java.lang.String sku>"
+    reason: >-
+      the only production construction is ProductServiceImpl.java:142-143 with saved.getSku();
+      Product.sku is written only at ProductServiceImpl.java:135 from request.sku() of the @Valid-bound
+      ProductRequest (ProductController.java:112) whose sku carries @Pattern(ValidationPatterns.SKU)
+      = ^[A-Z0-9][A-Z0-9-]{2,63}$ (ProductRequest.java:22)
+
+# Static String helpers summarised at their call sites (moved from mk_db_config.py): under 1-call a
+# helper with one call site merges every string passed through it, so taint is kept out of its body
+# (sanitizer on the parameter) and transferred from the argument to the result at each call.
+call-site-helpers:
+  - { method: "<com.shop.common.util.TextUtils: java.lang.String truncate(java.lang.String,int)>", reason: "shared String helper, 1-call merge" }
+  - { method: "<com.shop.common.util.CorrelationIdUtils: java.lang.String resolveOrGenerate(java.lang.String)>", reason: "shared String helper, 1-call merge" }
+  - { method: "<com.shop.order.entity.Order: java.lang.String truncate(java.lang.String)>", reason: "String helper, 1-call merge" }
+  - { method: "<com.shop.order.entity.Coupon: java.lang.String normalizeCode(java.lang.String)>", reason: "String helper, 1-call merge" }
+  - { method: "<com.shop.order.messaging.outbox.OutboxPublisher: java.lang.String truncate(java.lang.String)>", reason: "String helper, 1-call merge" }
+  - { method: "<com.shop.order.repository.CouponSpecifications: java.lang.String escapeLike(java.lang.String)>", reason: "String helper, 1-call merge" }
+  - { method: "<com.shop.order.repository.OrderSpecifications: java.lang.String escapeLike(java.lang.String)>", reason: "String helper, 1-call merge" }
+  - { method: "<com.shop.inventory.messaging.outbox.OutboxPublisher: java.lang.String truncate(java.lang.String)>", reason: "String helper, 1-call merge" }
+  - { method: "<com.shop.inventory.service.impl.StockReservationServiceImpl: java.lang.String truncate(java.lang.String)>", reason: "String helper, 1-call merge" }
+  - { method: "<com.shop.payment.messaging.outbox.OutboxPublisher: java.lang.String truncate(java.lang.String)>", reason: "String helper, 1-call merge" }
+  - { method: "<com.shop.payment.gateway.yookassa.YooKassaPaymentGateway: java.lang.String truncate(java.lang.String)>", reason: "String helper, 1-call merge" }

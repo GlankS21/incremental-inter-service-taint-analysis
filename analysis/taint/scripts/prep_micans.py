@@ -1,6 +1,7 @@
 """Lays out the classes of a service workdir for Micans.
 
-common-lib is extracted to <workdir>/common (analysed as application code). The other library jars
+The project's shared modules (env VKR_SHARED_JARS: comma-separated artifact names, e.g. common-lib;
+vkr_config.py discovers them) are extracted to <workdir>/common (analysed as application code). The other library jars
 stay as jars and are listed in <workdir>/libjars.txt: writing their ~50k classes out as files took
 ~7 min per service on Windows, reading them from the jars takes seconds. A library jar that has
 classes newer than Micans' ASM 9.4 can read is extracted to <workdir>/lib instead.
@@ -14,6 +15,14 @@ common = os.path.join(W, 'common')
 lib = os.path.join(W, 'lib')
 os.makedirs(common, exist_ok=True)
 os.makedirs(lib, exist_ok=True)
+
+
+SHARED = [a for a in os.environ.get('VKR_SHARED_JARS', '').split(',') if a]
+
+
+def shared(jar):
+    return any(jar == a + '.jar' or (jar.startswith(a + '-') and jar[len(a) + 1:len(a) + 2].isdigit())
+               for a in SHARED)
 
 
 def classes(z):
@@ -30,10 +39,10 @@ for jar in sorted(os.listdir(libdir)):
     path = os.path.join(libdir, jar)
     with zipfile.ZipFile(path) as z:
         names = classes(z)
-        if not jar.startswith('common-lib') and not any(too_new(z.open(n).read(8)) for n in names):
+        if not shared(jar) and not any(too_new(z.open(n).read(8)) for n in names):
             jars.append(path[4:])  # without \\?\: the list is read by Java
             continue
-        dest = common if jar.startswith('common-lib') else lib
+        dest = common if shared(jar) else lib
         for n in names:
             out = os.path.join(dest, *n.split('/'))
             if os.path.exists(out):
