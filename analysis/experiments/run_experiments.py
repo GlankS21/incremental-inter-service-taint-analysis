@@ -7,7 +7,9 @@ channel model and runs incremental.py against the warm cache of earlier runs. Wi
 commit is also analysed with an empty cache, and the two chain sets are compared (RQ2).
 
 usage: run_experiments.py [--only S01,V03] [--cold] [--repeat N] [--refresh] [--results results.csv]
-env:   VKR_EXP (default %LOCALAPPDATA%/vkr-exp), JAVA_HOME, MICANS_JAR
+env:   VKR_EXP (default %LOCALAPPDATA%/vkr-exp), JAVA_HOME, VKR_MICANS_JAR (or MICANS_JAR),
+       VKR_BASE_CONFIG (taint-{short}.yml: the hand-written base configs instead of the generated ones)
+The analysis is configured by taint/config/ecommerce.vkr-taint.yml of the copy.
 output: <VKR_EXP>/out/<scenario>/{patch.diff,build.log,channels.json,report.json,report-cold.json},
         <VKR_EXP>/out/results.csv (one row per run, appended)
 """
@@ -93,6 +95,7 @@ def extract_model(out):
 
 def analyse(work, model, report, baseline=None):
     args = [sys.executable, '-I', os.path.join(REPO, 'taint', 'scripts', 'incremental.py'),
+            '--config', os.path.join(REPO, 'taint', 'config', 'ecommerce.vkr-taint.yml'),
             '--model', model, '--out', report]
     if baseline:
         args += ['--baseline', baseline]
