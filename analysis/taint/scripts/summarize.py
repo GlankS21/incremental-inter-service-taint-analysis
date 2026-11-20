@@ -21,7 +21,7 @@ import sys
 # TaintFlow{source -> sink call}; StoreFlow{source -> <Entity: T field>} (vkr.plugin.SpringDataModel)
 ANY_FLOW = re.compile(r'^(TaintFlow|StoreFlow)\{(.*?) -> (<.*)\}$')
 # param source:  <Handler: R m(..)>/1
-PARAM_SRC = re.compile(r'^<([^:]+): \S+ ([^(]+)\([^)]*\)>/(\S+)$')
+PARAM_SRC = re.compile(r'^<([^:]+): \S+ ([^(]+)\(([^)]*)\)>/(\S+)$')
 # field source:  <accessor()> [i@Ln] $r = %this.<Dto: T field>
 FIELD_SRC = re.compile(r'^<[^>]*> \[[^\]]*\] \S+ = \S+\.<([^:]+): \S+ (\w+)>$')
 SINK_CALL = re.compile(r'^<([^:]+): \S+ ([^(]+)\([^)]*\)>\[\d+@L(-?\d+)\] (.*)/(\S+)$')
@@ -39,8 +39,11 @@ APP_PACKAGES = tuple(p + '.' for p in DISCOVERY.get('appPackages', [])) or ('com
 EVENT_PACKAGES = [p + '.' for p in DISCOVERY.get('eventPackages', [])] or ['com.shop.common.event.']
 ENTITY_CLASSES = set(DISCOVERY.get('entityClasses', []))
 OUTBOX_METHODS = {m for _, m in DISCOVERY.get('outboxSinks', [])} or {'enqueue'}
+REST_TEMPLATE_CALL = re.compile(r'\.(exchange|postForObject|postForEntity|getForObject|getForEntity|put|delete)\(')
 LOGGER_CALL = re.compile(r'\.(trace|debug|info|warn|error)\(')
 SQL_CALL = re.compile(r'\.(createNativeQuery|createQuery|query\w*|update|execute)\(')
+# MyBatis mapper methods whose XML statement splices a parameter with ${} (gen_taint_config.py)
+MYBATIS_METHODS = {m for _, m in DISCOVERY.get('mybatisSinks', [])}
 
 
 def is_entity(cls):
@@ -90,6 +93,16 @@ def by_handler(items, key):
     return index
 
 
+def handlers_of(handler_index, cls, method, argc):
+    """Handlers named cls#method. Overloads (mall-admin has getList() and getList(keyword, ...)) are
+    told apart by the number of model params; if none matches exactly (a param the model does not
+    list, e.g. HttpServletRequest), all of them are kept."""
+    hs = handler_index.get((cls, method), [])
+    if len(hs) > 1:
+        hs = [h for h in hs if len(h.get('params', [])) == argc] or hs
+    return hs
+
+
 def add_exits(entries, entry_ids, src_in, exits):
     for entry_id in entry_ids:
         e = entries.setdefault((entry_id, src_in), {'entry': entry_id, 'input': src_in, 'exits': []})
@@ -104,9 +117,15 @@ def summary(service, log_path, model_path, out_path, app_dir, common_dir):
     listeners = [e for e in model['listeners'] if e['service'] == service]
     publishers = [p for p in model['publishers'] if p['service'] == service]
     handler_index = by_handler(endpoints + listeners, 'handler')
-    clients = {}
+    clients, rt_sites = {}, {}
     for c in model['httpClients']:
         if c['service'] == service:
+            if c.get('clientKind') == 'REST_TEMPLATE':
+                # the declaration is the RestTemplate call statement itself; the call sites are the
+                # callers of a helper that wraps it (one client per caller and URL template)
+                d = c['declaration']
+                rt_sites.setdefault((d['className'], d['method']), []).append((d['line'], c))
+                continue
             for site in c['callSites']:
                 clients[(site['className'], site['method'], c['declaration']['method'])] = c
 
@@ -160,8 +179,9 @@ def summary(service, log_path, model_path, out_path, app_dir, common_dir):
             continue
         kind, source, sink = flow.groups()
         if m := PARAM_SRC.match(source):
-            src_cls, src_m, src_in = m.groups()
-            entry_ids = [h['id'] for h in handler_index.get((src_cls, src_m), [])] or [f'{src_cls}#{src_m}']
+            src_cls, src_m, src_params, src_in = m.groups()
+            argc = len([p for p in src_params.split(',') if p])
+            entry_ids = [h['id'] for h in handlers_of(handler_index, src_cls, src_m, argc)] or [f'{src_cls}#{src_m}']
         elif m := FIELD_SRC.match(source):
             dto_cls, field = m.groups()
             src_in = f'{dto_cls.rsplit(".", 1)[1]}.{field}'
@@ -194,6 +214,13 @@ def summary(service, log_path, model_path, out_path, app_dir, common_dir):
                           for p in event_publishers(event_cls, sink_cls, sink_m, sink_line)]
         elif (sink_cls, sink_m, callee) in clients:
             exits = [{'kind': 'CHANNEL', 'channel': clients[(sink_cls, sink_m, callee)]['id'], 'arg': sink_idx}]
+        elif (sink_cls, sink_m) in rt_sites and REST_TEMPLATE_CALL.search(call):
+            # the RestTemplate statement of that method closest to the sink line (a statement may span
+            # lines); a helper called from several places is one client per caller: the flow may go
+            # through any of them (the summary does not know the calling context)
+            sites = rt_sites[(sink_cls, sink_m)]
+            line = min({l for l, _ in sites}, key=lambda l: abs(l - sink_line))
+            exits = [{'kind': 'CHANNEL', 'channel': c['id'], 'arg': sink_idx} for l, c in sites if l == line]
         elif callee in OUTBOX_METHODS:
             pubs = [p for p in publishers if p['origin']['className'] == sink_cls
                     and p['origin']['method'] == sink_m]
@@ -201,7 +228,7 @@ def summary(service, log_path, model_path, out_path, app_dir, common_dir):
                       'coarse': True}] if pubs else []
         elif LOGGER_CALL.search(call):
             exits = [{'kind': 'LOCAL', 'cwe': 'CWE-117', 'site': site}]
-        elif SQL_CALL.search(call):
+        elif SQL_CALL.search(call) or callee in MYBATIS_METHODS:
             exits = [{'kind': 'LOCAL', 'cwe': 'CWE-89', 'site': site}]
         else:
             exits = [{'kind': 'UNKNOWN', 'site': site, 'call': call}]

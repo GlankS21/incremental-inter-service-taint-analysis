@@ -21,6 +21,7 @@ usage: gen_taint_config.py [--config vkr-taint.yml] --model channels.json [--ser
                            --out-dir DIR          -> DIR/taint-<service>.yml, DIR/discovery-<service>.json
 """
 import argparse
+import io
 import json
 import os
 import re
@@ -52,6 +53,10 @@ CATALOGUES = {
         ('SQL injection', [
             {'method': '<jakarta.persistence.EntityManager: jakarta.persistence.Query createNativeQuery(java.lang.String)>', 'index': 0},
             {'method': '<jakarta.persistence.EntityManager: jakarta.persistence.Query createQuery(java.lang.String)>', 'index': 0},
+            # Spring Boot 2 and older: JPA under javax (a catalogue entry whose class the service does
+            # not package is dropped, see Service.has_class)
+            {'method': '<javax.persistence.EntityManager: javax.persistence.Query createNativeQuery(java.lang.String)>', 'index': 0},
+            {'method': '<javax.persistence.EntityManager: javax.persistence.Query createQuery(java.lang.String)>', 'index': 0},
             {'method': '<org.springframework.jdbc.core.JdbcTemplate: * query*(java.lang.String,*{0+})>', 'index': 0},
             {'method': '<org.springframework.jdbc.core.JdbcTemplate: int update(java.lang.String,*{0+})>', 'index': 0},
             {'method': '<org.springframework.jdbc.core.JdbcTemplate: void execute(java.lang.String)>', 'index': 0},
@@ -69,6 +74,29 @@ CATALOGUES = {
         ]),
     ],
 }
+
+# RestTemplate calls of the channel model (clientKind REST_TEMPLATE): the URL (path variables and
+# query parameters concatenated into it) and the request body are the outgoing channel end.
+# summarize.py maps a flow into one of these calls to the client recorded at that call site.
+RT = 'org.springframework.web.client.RestTemplate'
+RE = 'org.springframework.http.ResponseEntity'
+REST_TEMPLATE_SINKS = [
+    (f'<{RT}: {ret} {m}({params})>', idx)
+    for ret, m, params, idxs in [
+        (RE, 'exchange', 'java.lang.String,org.springframework.http.HttpMethod,org.springframework.http.HttpEntity,java.lang.Class,java.lang.Object[]', (0, 2)),
+        (RE, 'exchange', 'java.lang.String,org.springframework.http.HttpMethod,org.springframework.http.HttpEntity,org.springframework.core.ParameterizedTypeReference,java.lang.Object[]', (0, 2)),
+        (RE, 'exchange', 'java.lang.String,org.springframework.http.HttpMethod,org.springframework.http.HttpEntity,java.lang.Class,java.util.Map', (0, 2)),
+        ('java.lang.Object', 'postForObject', 'java.lang.String,java.lang.Object,java.lang.Class,java.lang.Object[]', (0, 1)),
+        (RE, 'postForEntity', 'java.lang.String,java.lang.Object,java.lang.Class,java.lang.Object[]', (0, 1)),
+        ('java.lang.Object', 'getForObject', 'java.lang.String,java.lang.Class,java.lang.Object[]', (0,)),
+        (RE, 'getForEntity', 'java.lang.String,java.lang.Class,java.lang.Object[]', (0,)),
+        ('void', 'put', 'java.lang.String,java.lang.Object,java.lang.Object[]', (0, 1)),
+        ('void', 'delete', 'java.lang.String,java.lang.Object[]', (0,)),
+    ] for idx in idxs]
+REST_TEMPLATE_TRANSFERS = [
+    ('<org.springframework.http.HttpEntity: void <init>(java.lang.Object)>', 0, 'base'),
+    ('<org.springframework.http.HttpEntity: void <init>(java.lang.Object,org.springframework.util.MultiValueMap)>', 0, 'base'),
+]
 
 JDK_TRANSFERS = [
     ('boxing', [
@@ -255,6 +283,7 @@ class Service:
         for c in self.app_classes + self.shared_classes:
             self.by_simple.setdefault(simple(c), []).append(c)
         self.info = {}
+        self._has = {}
 
     def load(self, classes):
         need = [c for c in classes if c and c not in self.info]
@@ -278,6 +307,30 @@ class Service:
             return False
         with zipfile.ZipFile(self.jar) as z:
             return any(n.startswith('BOOT-INF/lib/' + prefix) for n in z.namelist())
+
+    def has_class(self, name):
+        """True when the service packages the class (its own classes, a shared module or a library jar
+        of its Spring Boot jar). A sink on a class the service lacks is not only useless: Tai-e makes a
+        phantom class of it, and Micans' Spring model fails on its custom beans (JdbcTemplate) when
+        their class is phantom."""
+        if name in self._has:
+            return self._has[name]
+        entry = name.replace('.', '/') + '.class'
+        found = name in self.app_classes or name in self.shared_classes
+        if not found and self.jar:
+            with zipfile.ZipFile(self.jar) as z:
+                for n in z.namelist():
+                    if not (n.startswith('BOOT-INF/lib/') and n.endswith('.jar')):
+                        continue
+                    try:
+                        with z.open(n) as raw, zipfile.ZipFile(io.BytesIO(raw.read())) as lib:
+                            found = entry in lib.NameToInfo
+                    except zipfile.BadZipFile:  # an unreadable library cannot provide the class
+                        continue
+                    if found:
+                        break
+        self._has[name] = found
+        return found
 
     def entity_classes(self):
         out = []
@@ -382,7 +435,10 @@ def generate(cfg, model, module, java_home):
     # ---- sinks
     sink_groups = []
     feign = []
+    rest_template = [c for c in clients if c.get('clientKind') == 'REST_TEMPLATE']
     for c in clients:
+        if c in rest_template:
+            continue
         d = c['declaration']
         m = _pick_method(svc.info.get(d['className']), d['method'], c.get('params') or [])
         if not m:
@@ -396,6 +452,10 @@ def generate(cfg, model, module, java_home):
                     feign.append(e)
     if feign:
         sink_groups.append(('outgoing HTTP channel (OpenFeign)', feign))
+    rest_template = rest_template and svc.has_class(RT)
+    if rest_template:
+        sink_groups.append(('outgoing HTTP channel (RestTemplate: URL and request body)',
+                            [{'method': m, 'index': i} for m, i in REST_TEMPLATE_SINKS]))
     amqp = []
     outbox_sinks = []
     outbox_pubs = [p for p in publishers if p.get('mechanism') == 'OUTBOX']
@@ -443,11 +503,15 @@ def generate(cfg, model, module, java_home):
     if amqp:
         sink_groups.append(('outgoing AMQP channel' + (' (transactional outbox: enqueue = send)' if outbox_pubs else ''),
                             amqp))
+    mybatis_methods = []
     for cat in cfg['taint']['sinks']:
         if cat in CATALOGUES:
-            sink_groups += CATALOGUES[cat]
+            for title, entries in CATALOGUES[cat]:
+                kept = [e for e in entries if svc.has_class(e['method'][1:].split(':')[0].rstrip('^'))]
+                if kept:
+                    sink_groups.append((title, kept))
             if cat == 'cwe-89':
-                mb = mybatis_sinks(svc, notes)
+                mb, mybatis_methods = mybatis_sinks(svc, notes)
                 if mb:
                     sink_groups.append(('SQL injection: MyBatis ${} substitution', mb))
         else:
@@ -464,6 +528,9 @@ def generate(cfg, model, module, java_home):
             'an event built from a tainted component is tainted (the payload crosses the channel as a whole)',
             [{'method': f'<{p}.*: void <init>(*{{{n}+}})>', 'from': n - 1, 'to': 'base'}
              for p in event_packages for n in range(1, max_ctor + 1)]))
+    if rest_template:
+        transfer_groups.append(('a request entity built from a tainted body is tainted',
+                                [{'method': m, 'from': f, 'to': t} for m, f, t in REST_TEMPLATE_TRANSFERS]))
     for title, items in JDK_TRANSFERS:
         transfer_groups.append((title, [{'method': m, 'from': f, 'to': t} for m, f, t in items]))
 
@@ -492,38 +559,173 @@ def generate(cfg, model, module, java_home):
     discovery = {'service': name, 'appPackages': app_packages, 'dtoPackages': dto_packages,
                  'dtoClasses': sorted(dto_classes), 'eventPackages': event_packages, 'eventClasses': event_classes,
                  'entityPackages': entity_packages, 'entityClasses': entity_classes,
-                 'outboxSinks': outbox_sinks, 'notes': notes}
+                 'outboxSinks': outbox_sinks, 'mybatisSinks': mybatis_methods, 'notes': notes}
     return '\n'.join(lines) + '\n', discovery, notes
 
 
-def mybatis_sinks(svc, notes):
-    """XML mappers: a statement whose text has ${...} splices a parameter into the SQL, so the mapper
-    method (namespace = interface, id = method) is a sink at its parameter(s). With one parameter the
-    index is 0; with several, every non-primitive one (@Param names are not matched: no -v parse)."""
-    out = []
-    for d, _, files in os.walk(svc.app):
-        for f in files:
-            if not f.endswith('.xml'):
-                continue
-            with open(os.path.join(d, f), encoding='utf-8', errors='replace') as fh:
-                text = fh.read()
-            ns = re.search(r'<mapper\s+namespace="([\w.$]+)"', text)
-            if not ns:
-                continue
-            for stmt in re.finditer(r'<(select|insert|update|delete)\b[^>]*\bid="(\w+)"[^>]*>(.*?)</\1>', text, re.S):
-                if '${' not in stmt.group(3):
-                    continue
-                info = svc.cls(ns.group(1))
-                ms = info.find(stmt.group(2)) if info else []
-                if not ms:
-                    notes.append(f'MyBatis {ns.group(1)}.{stmt.group(2)}: mapper method not found')
-                for m in ms:
-                    idxs = [0] if len(m[1]) == 1 else [i for i, t in enumerate(m[1]) if t not in PRIMITIVES]
-                    for i in idxs:
-                        e = {'method': tai_sig(ns.group(1), m), 'index': i}
-                        if e not in out:
-                            out.append(e)
+MYBATIS_STATEMENTS = ('select', 'insert', 'update', 'delete')
+MYBATIS_SUBST = re.compile(r'\$\{\s*([^},\s]+)')
+MYBATIS_IMPLICIT = {'_parameter': 0}  # the single parameter object itself
+
+
+def mapper_param_names(java_home, classpath, classes, chunk=150):
+    """{interface: {(method, (param types)): [name of each parameter]}} of mapper interfaces: the @Param
+    value, else the compiled name (MethodParameters, javac -parameters; MyBatis' useActualParamName),
+    else None. One javap JVM per chunk of classes."""
+    result = {}
+    classes = sorted(set(classes))
+    for i in range(0, len(classes), chunk):
+        r = subprocess.run([os.path.join(java_home, 'bin', 'javap'), '-v', '-p', '-cp', os.pathsep.join(classpath),
+                            *classes[i:i + chunk]], capture_output=True, text=True, encoding='utf-8', errors='replace')
+        for block in re.split(r'^(?=Classfile )', r.stdout, flags=re.M):
+            m = re.search(r'^\S.*\binterface\s+([\w.$]+)', block, re.M)
+            if m:
+                result[m.group(1)] = _param_names(block)
+    return result
+
+
+def _param_names(text):
+    out, key, names, param, section, pending_name = {}, None, [], None, None, None
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith('descriptor:') and '(' in s:
+            if key:
+                out[key] = names
+            params, _ = parse_descriptor(s.split(':', 1)[1].strip())
+            key, names, section = (pending_name, tuple(params)), [None] * len(params), None
+        elif line.startswith('  ') and not line.startswith('   ') and '(' in s:
+            pending_name = s.split('(', 1)[0].split()[-1]
+        elif key is None:
+            continue
+        elif s == 'MethodParameters:':
+            section, param = 'names', 0
+        elif s == 'RuntimeVisibleParameterAnnotations:':
+            section = 'annotations'
+        elif section == 'names' and s and not s.startswith('Name ') and param < len(names) \
+                and line.startswith('      ') and re.fullmatch(r'[\w$]+(\s+\w+)*', s):
+            names[param] = s.split()[0]
+            param += 1
+        elif section == 'annotations' and (m := re.match(r'parameter (\d+):', s)):
+            param = int(m.group(1))
+        elif section == 'annotations' and (m := re.match(r'value="([^"]*)"', s)) and param < len(names):
+            names[param] = m.group(1)  # only org.apache.ibatis.annotations.Param has a value here in practice
+        elif not line.startswith('    '):
+            section = None
+    if key:
+        out[key] = names
     return out
+
+
+def _mapper_statements(path):
+    """(namespace, [(statement id, [${} roots that are not foreach/bind locals])]) of a MyBatis XML mapper."""
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.parse(path).getroot()  # expat: no external DTD fetch, entity expansion bounded
+    except ET.ParseError:
+        return None, []
+    if root.tag != 'mapper' or not root.get('namespace'):
+        return None, []
+    ns = root.get('namespace')
+    fragments = {e.get('id'): e for e in root.iter('sql') if e.get('id')}
+
+    def walk(e, local, seen, out):
+        local = set(local) | {c.get('name') for c in e if c.tag == 'bind' and c.get('name')}
+        if e.tag == 'foreach':
+            local |= {e.get('item'), e.get('index')} - {None}
+        if e.tag == 'include':
+            ref = (e.get('refid') or '').removeprefix(ns + '.')
+            if ref in fragments and ref not in seen:
+                walk(fragments[ref], local, seen | {ref}, out)
+        for text in (e.text, *(c.tail for c in e)):
+            for m in MYBATIS_SUBST.finditer(text or ''):
+                path = re.split(r'[.\[]', m.group(1))
+                if path[0] not in local:
+                    out.append(path)
+        for c in e:
+            walk(c, local, seen, out)
+
+    stmts = []
+    for e in root:
+        if e.tag in MYBATIS_STATEMENTS and e.get('id'):
+            roots = []
+            walk(e, set(), frozenset(), roots)
+            if roots:
+                stmts.append((e.get('id'), roots))
+    return ns, stmts
+
+
+def _has_field(svc, cls, field):
+    seen = set()
+    while cls and cls not in seen and not cls.startswith('java.'):
+        seen.add(cls)
+        info = svc.cls(cls)
+        if not info:
+            return False
+        if any(f[1] == field for f in info.fields):
+            return True
+        m = re.search(r'\bextends\s+([\w.$]+)', info.header)
+        cls = m.group(1) if m and not info.is_interface else None
+    return False
+
+
+def mybatis_sinks(svc, notes):
+    """XML mappers of the service and the shared modules: ${...} splices text into the SQL, so the
+    mapper method (namespace = interface, id = method) is a CWE-89 sink at the parameter the expression
+    names: a named parameter (@Param, or the compiled name) or param<N>/arg<N>; with one parameter, the
+    expression is a property of it (index "0.<field>": the taint sits in that field, e.g. the
+    orderByClause of a MyBatis Generator Example) or the parameter itself. foreach items and bind
+    variables are skipped: they are built by the mapper (MyBatis Generator's ${criterion.condition}
+    is a constant of the generated criteria). Returns (sink entries, [[interface, method]])."""
+    out, methods, mappers = [], [], []
+    for d in [svc.app, *svc.shared]:
+        for dirpath, _, files in os.walk(d):
+            for f in sorted(files):
+                if f.endswith('.xml'):
+                    ns, stmts = _mapper_statements(os.path.join(dirpath, f))
+                    if stmts:
+                        mappers.append((ns, stmts))
+    if not mappers:
+        return out, methods
+    svc.load([ns for ns, _ in mappers])
+    all_names = mapper_param_names(svc.java_home, svc.classpath, [ns for ns, _ in mappers])
+    for ns, stmts in mappers:
+        info = svc.cls(ns)
+        if not info:
+            notes.append(f'MyBatis mapper {ns}: interface not on the classpath')
+            continue
+        names = all_names.get(ns, {})
+        for sid, roots in stmts:
+            ms = info.find(sid)
+            if not ms:
+                notes.append(f'MyBatis {ns}.{sid}: mapper method not found')
+            for m in ms:
+                pnames = names.get((m[0], tuple(m[1])), [None] * len(m[1]))
+                for path in roots:
+                    idx, rest = None, path[1:]
+                    if path[0] in pnames:
+                        idx = pnames.index(path[0])
+                    elif pm := re.fullmatch(r'param(\d+)', path[0]):
+                        idx = int(pm.group(1)) - 1
+                    elif am := re.fullmatch(r'arg(\d+)', path[0]):
+                        idx = int(am.group(1))
+                    elif path[0] in MYBATIS_IMPLICIT or len(m[1]) == 1:
+                        idx = 0
+                        rest = path[1:] if path[0] in MYBATIS_IMPLICIT else path
+                    if idx is None or not 0 <= idx < len(m[1]):
+                        notes.append(f'MyBatis {ns}.{sid}: ${{{".".join(path)}}} names no parameter')
+                        continue
+                    ptype = m[1][idx]
+                    index = idx
+                    if rest and _has_field(svc, ptype, rest[0]):
+                        index = f'{idx}.{rest[0]}'
+                    elif ptype in PRIMITIVES:
+                        continue  # a number spliced into SQL is no injection
+                    e = {'method': tai_sig(ns, m), 'index': index}
+                    if e not in out:
+                        out.append(e)
+                    if [ns, m[0]] not in methods:
+                        methods.append([ns, m[0]])
+    return out, methods
 
 
 def generate_all(cfg, model, out_dir, services=None):
