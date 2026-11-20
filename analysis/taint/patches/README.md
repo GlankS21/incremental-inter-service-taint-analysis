@@ -17,11 +17,32 @@ measurements.
    `vkr.skipTaintGraph=true`; the CI path reads only the `TaintFlow{`/`StoreFlow{` lines.
    The benchmark and verification runs leave the property unset and keep the `.dot` graphs.
 
+## `micans-phantom-beans.patch`
+
+`SpringIocAnalysis.createBeans` makes custom beans of `JdbcTemplate` and `RedisTemplate` whenever the
+class hierarchy has the class. A service that does not package spring-jdbc still sees `JdbcTemplate`
+as a phantom class (a library references it), which has no constructor, and the analysis fails with
+"No matching bean constructor found" (train-ticket, ts-cancel-service). The patch skips phantom
+classes there. It does not change a run on a service that packages the class (the ecommerce
+testbed). The jar built before it is kept as `build/micans-tci3.jar`.
+
+## `micans-static-base-transfer.patch`
+
+The generated configs carry wildcard accessor transfers `<pkg.*: * *()>` from `base` to `result`
+for every DTO and event package. In the ecommerce testbed these packages hold records only, but a
+Lombok class also has a static no-argument `builder()`, which the wildcard matches; a static call
+has no base variable and `TransferHandler.processTransfer` failed with a `ClassCastException`
+(train-ticket ts-preserve-other-service, mall-swarm mall-admin). The patch skips a transfer from or
+to `base` at a static call site; any run that did not crash is unchanged. The jar built before it
+is kept as `build/micans-phantom.jar`.
+
 ## How to apply
 
 ```sh
 cd <micans-source>
 patch -p1 < <repo>/analysis/taint/patches/micans-world-cache.patch
+patch -p1 < <repo>/analysis/taint/patches/micans-phantom-beans.patch
+patch -p1 < <repo>/analysis/taint/patches/micans-static-base-transfer.patch
 JAVA_HOME=<jdk-24> sh gradlew packageMicans   # writes build/micans.jar
 ```
 

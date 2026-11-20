@@ -164,12 +164,12 @@ def taint_configs(cfg, name, w, base, discovery):
     base_text = open(base, encoding='utf-8').read()
     coarse = os.path.join(w, 'taint-coarse.yml')
     # a hand-written base asks for the generated DTO fields with a comment naming mk_dto_fields
+    dirs = os.pathsep.join(d for d in (os.path.join(w, 'app'), os.path.join(w, 'common')) if os.path.isdir(d))
     if disc['dtoPackages'] and 'kind: field' not in base_text and (
             'baseConfig' not in disc or 'mk_dto_fields' in base_text):
-        py(env, s('mk_dto_fields.py'), os.path.join(w, 'app'), ','.join(disc['dtoPackages']), base, coarse)
+        py(env, s('mk_dto_fields.py'), dirs, ','.join(disc['dtoPackages']), base, coarse)
     else:
         shutil.copyfile(base, coarse)
-    dirs = os.pathsep.join(d for d in (os.path.join(w, 'common'), os.path.join(w, 'app')) if os.path.isdir(d))
     if disc['eventPackages']:
         py(env, s('mk_event_fields.py'), dirs, ','.join(disc['eventPackages']),
            os.path.join(w, 'event-sources.yml'), os.path.join(w, 'event-sinks.yml'))
@@ -180,7 +180,7 @@ def taint_configs(cfg, name, w, base, discovery):
     py(env, s('mk_field_config.py'), coarse, os.path.join(w, 'taint-field.yml'), cwd=w)
     entity = os.path.join(w, 'entity-sources.yml')
     if disc['entityPackages']:
-        py(env, s('mk_entity_fields.py'), os.path.join(w, 'app'), ','.join(disc['entityPackages']), entity)
+        py(env, s('mk_entity_fields.py'), dirs, ','.join(disc['entityPackages']), entity)
     else:
         with open(entity, 'w', encoding='utf-8') as fh:
             fh.write('  # entity fields: no @Entity class in this service\n')
