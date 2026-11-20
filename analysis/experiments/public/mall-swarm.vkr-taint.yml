@@ -1,0 +1,20 @@
+# vkr-taint configuration of mall-swarm (macrozheng), built by build_public.sh into VKR_PUBLIC_BUILD.
+version: 1
+project:
+  root: ${VKR_PUBLIC_BUILD:-${LOCALAPPDATA}/vkr-exp/build}/mall-swarm
+  gateway-config: auto
+services: auto
+shared: auto
+taint:
+  sinks: [cwe-89, cwe-117]
+  sources: auto
+  discovery: annotations
+analysis:
+  context: 1-call
+  heap: ${VKR_HEAP:-24g}
+  world-cache: ${VKR_WORLD_CACHE:-off}
+toolchain:
+  java-home: ${JAVA_HOME}
+  micans-jar: ${VKR_MICANS_JAR:-${MICANS_JAR}}
+gate:
+  fail-on: none

@@ -18,13 +18,15 @@ SKIP_TYPES = re.compile(r'^(java\.util\.(List|Set|Map|Collection)|byte\[\])')
 # proof under `exclusions:` of the project's overrides file (for the testbed
 # config/ecommerce.vkr-taint-overrides.yml) and removed from the merged config by vkr_prepare.py.
 
-app, pkgs, out = sys.argv[1:4]
+dirs, pkgs, out = sys.argv[1:4]  # dirs: <classes dir>[<os.pathsep><dir>...] (app first, then shared)
+dirs = [d for d in dirs.split(os.pathsep) if d]
 lines = ['  # entity fields: what a request reads back from the database']
-for pkg, f in [(p, f) for p in pkgs.split(',') if p for f in sorted(os.listdir(os.path.join(app, *p.split('.'))))]:
+for pkg, f in sorted({(p, f) for p in pkgs.split(',') if p for d in dirs if os.path.isdir(os.path.join(d, *p.split('.')))
+                      for f in os.listdir(os.path.join(d, *p.split('.')))}):
     if not f.endswith('.class') or '$' in f:
         continue
     cls = f'{pkg}.{f[:-6]}'
-    text = subprocess.run([JAVAP, '-p', '-cp', app, cls], capture_output=True, text=True).stdout
+    text = subprocess.run([JAVAP, '-p', '-cp', os.pathsep.join(dirs), cls], capture_output=True, text=True).stdout
     if re.search(r'\bfinal class \S+ extends java\.lang\.Enum|\benum\b', text.split('{')[0]):
         continue
     for typ, name in re.findall(r'^\s+(?:private|protected) (?!static)(?:final )?([\w.$\[\]]+) (\w+);', text, re.M):
