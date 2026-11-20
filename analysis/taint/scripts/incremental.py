@@ -6,7 +6,9 @@ Each service is re-analysed only when something its Micans run reads has changed
                 config generators, launcher, Micans jar, JDK, context sensitivity) -> taint/store flows
   summary key = hash(run key, channel model, summarize.py)                   -> summary.json
 Composition is cheap and always recomputed from the summaries; its chains to a sink are compared
-with a baseline report, and new chains fail the run with --gate.
+with a baseline report, and new chains fail the run with --gate (exit 1).
+A service whose analysis fails does not stop the run: the report lists it under "failed", baseline
+chains through it go to "unchecked" (not "removed"), and with --gate the run exits 2.
 
 Everything project-specific comes from vkr-taint.yml (vkr_config.py): services, shared modules,
 toolchain (JDK, Micans jar), context sensitivity, heap, world cache, gate. The project must be built
@@ -152,6 +154,19 @@ def prepare(svc, rkey, base, discovery):
     return w
 
 
+class ServiceFailed(Exception):
+    """One service could not be analysed; the run goes on with the others and reports it."""
+
+    def __init__(self, reason, log=None):
+        super().__init__(reason)
+        self.reason, self.log = reason, log
+
+
+def failed_services_in(chain, failed):
+    """Services of a chain that failed in this run (a chain names each node as ep|lis|db:<service>:...)."""
+    return sorted({s for s in failed if re.search(rf'\b(?:ep|lis|db):{re.escape(s)}:', chain)})
+
+
 def analyse(svc, rkey, flows_path, base, discovery):
     """Micans run on a fresh workdir; keeps only the flow lines of the log."""
     w = prepare(svc, rkey, base, discovery)
@@ -161,7 +176,7 @@ def analyse(svc, rkey, flows_path, base, discovery):
     with open(log, encoding='utf-8', errors='replace') as f:
         lines = f.read().splitlines()
     if not lines or not lines[-1].startswith('exit=0'):
-        sys.exit(f'{svc}: analysis failed, see {log}')
+        raise ServiceFailed('analysis failed', log)
     flows = [l for l in lines if l.startswith(FLOW_PREFIXES)]
     with open(flows_path + '.tmp', 'w', encoding='utf-8') as f:
         f.write('\n'.join(flows) + '\n')
@@ -223,27 +238,38 @@ def main():
     model_json = json.load(open(model, encoding='utf-8'))
     compile_launcher()
     report = {'services': {}}
-    summaries = []
+    summaries, failed = [], []
     for svc in services:
         t0 = time.time()
-        base, discovery = vkr_prepare.base_config(CFG, model_json, svc, os.path.join(WORK, 'gen', svc))
-        rkey = run_key(svc, base, discovery)
-        d = os.path.join(CACHE, svc, rkey[:16])
-        os.makedirs(d, exist_ok=True)
-        flows = os.path.join(d, 'flows.txt')
-        hit_run = os.path.exists(flows)
-        if not hit_run:
-            analyse(svc, rkey, flows, base, discovery)
-        skey = summary_key(rkey, model)
-        summary = os.path.join(d, f'summary-{skey[:16]}.json')
-        hit_summary = os.path.exists(summary)
-        if not hit_summary:
-            summarize(svc, rkey, flows, model, summary, base, discovery)
+        try:
+            base, discovery = vkr_prepare.base_config(CFG, model_json, svc, os.path.join(WORK, 'gen', svc))
+            rkey = run_key(svc, base, discovery)
+            d = os.path.join(CACHE, svc, rkey[:16])
+            os.makedirs(d, exist_ok=True)
+            flows = os.path.join(d, 'flows.txt')
+            hit_run = os.path.exists(flows)
+            if not hit_run:
+                analyse(svc, rkey, flows, base, discovery)
+            skey = summary_key(rkey, model)
+            summary = os.path.join(d, f'summary-{skey[:16]}.json')
+            hit_summary = os.path.exists(summary)
+            if not hit_summary:
+                summarize(svc, rkey, flows, model, summary, base, discovery)
+        except (ServiceFailed, subprocess.CalledProcessError, OSError, ValueError) as e:
+            # a failed service has no summary: compose marks the channels into it "(no summary yet)"
+            reason = e.reason if isinstance(e, ServiceFailed) else f'{type(e).__name__}: {e}'
+            log = getattr(e, 'log', None)
+            failed.append(svc)
+            report['services'][svc] = {'failed': reason, 'log': log, 'seconds': round(time.time() - t0, 1)}
+            print(f'{svc}: FAILED ({reason})' + (f', see {log}' if log else '') + f', {time.time() - t0:.0f} s',
+                  flush=True)
+            continue
         summaries.append(summary)
         report['services'][svc] = {'runKey': rkey[:16], 'runCached': hit_run, 'summaryCached': hit_summary,
                                    'seconds': round(time.time() - t0, 1)}
         print(f'{svc}: run {"hit" if hit_run else "miss"}, summary {"hit" if hit_summary else "miss"}, '
               f'{time.time() - t0:.0f} s', flush=True)
+    report['failed'] = failed
     composed = subprocess.run([sys.executable, '-I', os.path.join(T, 'scripts', 'summarize.py'), 'compose',
                                model, *summaries], check=True, capture_output=True, text=True,
                               env=vkr_prepare.tool_env(CFG)).stdout
@@ -255,8 +281,11 @@ def main():
         old = json.load(open(a.baseline, encoding='utf-8'))['chains']
         old_keys, cur_keys = {chain_key(c) for c in old}, {chain_key(c) for c in chains}
         new = [c for c in chains if chain_key(c) not in old_keys]
-        removed = [c for c in old if chain_key(c) not in cur_keys]
+        gone = [c for c in old if chain_key(c) not in cur_keys]
+        # a baseline chain through a service that failed now was not re-checked, it is not removed
+        removed = [c for c in gone if not failed_services_in(c, failed)]
         report['new'], report['removed'] = new, removed
+        report['unchecked'] = [c for c in gone if failed_services_in(c, failed)]
     with open(a.out, 'w', encoding='utf-8') as f:
         json.dump(report, f, indent=1)
     crossing = sum('-->' in c for c in chains)
@@ -265,8 +294,12 @@ def main():
           + f'; {report["seconds"]:.0f} s total -> {a.out}')
     for c in new:
         print('NEW', c)
+    if failed:
+        print(f'{len(failed)} of {len(services)} services FAILED, their chains are missing: {", ".join(failed)}')
     if gate and new:
         sys.exit(1)
+    if gate and failed:
+        sys.exit(2)  # an incomplete analysis must not pass the gate
 
 
 if __name__ == '__main__':
