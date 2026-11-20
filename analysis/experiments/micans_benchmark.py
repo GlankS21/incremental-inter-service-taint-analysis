@@ -27,6 +27,8 @@ MICANS_JAR = os.environ.get('MICANS_JAR', 'C:/Users/asgat/OneDrive/Máy tính/Wo
                             'vkr-artifacts/miscans/src-extract/micans-source/build/micans.jar')
 # run.py of the Micans artifact drops these libraries for these systems
 EXCLUDED_LIBS = {'basemall': ('/bcprov-jdk', '/okhttp'), 'mall4cloud': ('/seata-all',)}
+# whole-system runs with the world cache (ADR-TCI-3) are written to runs-wc/, the recorded runs/ stay
+WORLD_CACHE = '' if os.environ.get('VKR_WORLD_CACHE', 'off') == 'off' else os.environ['VKR_WORLD_CACHE']
 
 
 def classpaths(bench, system):
@@ -49,7 +51,14 @@ def micans_cmd(out, services, xmx, gc):
                 paths = apps if opt == 'apps' else libs
                 f.write(f'{flag}\n"{svc}={",".join(paths)}"\n'.replace('\\', '/'))
         f.write(f'--taint\n--output-dir\n"{os.path.join(out, "tai-e")}"\n'.replace('\\', '/'))
-    return [os.path.join(JAVA_HOME, 'bin', 'java'), f'-Xmx{xmx}', '-Xss512m', f'-Xlog:gc:file={gc}',
+        # ADR-TCI-3 fair baseline: with VKR_WORLD_CACHE=rw|ro the whole-system run gets the same
+        # world cache and skips the taint-graph dump, as the per-service runs of the method do
+        if WORLD_CACHE:
+            f.write('--world-cache-mode\n')
+    props = []
+    if WORLD_CACHE:
+        props = ['-Dvkr.skipTaintGraph=true'] + (['-Dvkr.worldCacheReadOnly=true'] if WORLD_CACHE == 'ro' else [])
+    return [os.path.join(JAVA_HOME, 'bin', 'java'), f'-Xmx{xmx}', '-Xss512m', f'-Xlog:gc:file={gc}', *props,
             '-jar', MICANS_JAR, '@' + os.path.join(out, 'args.txt')]
 
 
@@ -61,16 +70,22 @@ def method_cmd(out, services, xmx, gc):
     open(libfile, 'w', encoding='utf-8').write('\n'.join(libs) + '\n')
     plugins = ('vkr.plugin.ListenerEntryPoints,vkr.plugin.StringParamSources,vkr.plugin.ChannelArgSink,'
                'vkr.plugin.ReachableClasses')
+    # ADR-TCI-3: the world cache is off by default (the runs stay comparable with Micans as
+    # published); the timing measurement turns it on through the environment.
+    world_cache = os.environ.get('VKR_WORLD_CACHE', '')
+    props = [f'-Dvkr.plugins={plugins}', '-Dvkr.channelSinks=true', '-Dvkr.listenerTaint=true',
+             f'-Dvkr.reachableClasses={os.path.join(out, "reachable-classes.txt")}']
+    if world_cache:
+        props.append(f'-Dvkr.worldCache={world_cache}')
     return [os.path.join(JAVA_HOME, 'bin', 'java'), f'-Xmx{xmx}', '-Xss512m', f'-Xlog:gc:file={gc}',
-            f'-Dvkr.plugins={plugins}', '-Dvkr.channelSinks=true', '-Dvkr.listenerTaint=true',
-            f'-Dvkr.reachableClasses={os.path.join(out, "reachable-classes.txt")}',
+            *props,
             '-cp', f'{os.path.join(TAINT, "launcher", "classes")};{MICANS_JAR}', 'vkr.MicansTaintMain',
             svc, ','.join(apps), '@' + libfile, os.path.join(TAINT, 'config', 'micans-benchmark.yml'),
             os.path.join(out, 'tai-e'), 'ci']
 
 
 def run(bench, system, jre_home, name, services, xmx, method=False):
-    out = os.path.join(bench, 'runs' + ('-method' if method else ''), system, name)
+    out = os.path.join(bench, 'runs' + ('-method' if method else '') + ('-wc' if WORLD_CACHE else ''), system, name)
     os.makedirs(out, exist_ok=True)
     gc = os.path.join(out, 'gc.log')
     cmd = (method_cmd if method else micans_cmd)(out, services, xmx, gc)
@@ -107,7 +122,7 @@ def main():
     a = ap.parse_args()
     cps = classpaths(a.bench, a.system)
     method = a.per_service_method
-    path = os.path.join(a.bench, 'runs' + ('-method' if method else ''), a.system, 'runs.csv')
+    path = os.path.join(a.bench, 'runs' + ('-method' if method else '') + ('-wc' if WORLD_CACHE else ''), a.system, 'runs.csv')
 
     def record(row):
         # a row is written as soon as its run ends, so an interrupted batch keeps the finished runs

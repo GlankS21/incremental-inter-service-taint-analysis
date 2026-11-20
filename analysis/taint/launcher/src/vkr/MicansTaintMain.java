@@ -85,6 +85,16 @@ public final class MicansTaintMain {
                       time-limit:3600;
                       """.formatted(cs, taintConfig.replace('\\', '/'),
                         System.getProperty("vkr.plugins", DEFAULT_PLUGINS))));
+        // vkr patch (ADR-TCI-3): the world cache trades a serialized World for the WorldBuilder
+        // phase (vkr.worldCache=rw saves and loads, ro only loads — a PR run must not write).
+        // Default off: the benchmark runs stay comparable with Micans as published.
+        String worldCache = System.getProperty("vkr.worldCache", "off");
+        if (!"off".equals(worldCache)) {
+            args.add(0, "--world-cache-mode");
+            if ("ro".equals(worldCache)) {
+                System.setProperty("vkr.worldCacheReadOnly", "true");
+            }
+        }
         int status = 0;
         try {
             pascal.taie.Main.main(args.toArray(new String[0]));
