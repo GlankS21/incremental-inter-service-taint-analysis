@@ -7,6 +7,6 @@ import java.util.List;
  */
 public record ChannelModel(String root, String gatewayConfig, List<String> services, List<Endpoint> endpoints,
                            List<HttpClientMethod> httpClients, List<Publisher> publishers,
-                           List<QueueBinding> bindings, List<Listener> listeners, List<Channel> channels,
-                           List<Unresolved> unresolved, List<String> warnings) {
+                           List<QueueBinding> bindings, List<DeadLetter> deadLetters, List<Listener> listeners,
+                           List<Channel> channels, List<Unresolved> unresolved, List<String> warnings) {
 }

@@ -10,6 +10,7 @@ import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.FieldAccessExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
+import com.github.javaparser.ast.expr.ObjectCreationExpr;
 import com.github.javaparser.ast.nodeTypes.NodeWithAnnotations;
 import ru.itmo.vkr.channels.model.CodeRef;
 import ru.itmo.vkr.channels.model.Endpoint;
@@ -19,16 +20,21 @@ import ru.itmo.vkr.channels.model.Unresolved;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * Spring MVC handler methods and OpenFeign client methods of one service. Programmatic HTTP
- * clients ({@code RestTemplate}, {@code RestClient}, {@code WebClient}) are listed as unresolved:
- * their target is only known at runtime.
+ * Spring MVC handler methods, OpenFeign client methods and {@code RestTemplate} requests of one
+ * service. A {@code RestTemplate} request becomes a client when its URL resolves to a service host
+ * and a path; otherwise, like every {@code RestClient} and {@code WebClient} call, it is listed as
+ * unresolved.
  */
 final class SpringWebExtractor {
 
@@ -50,19 +56,36 @@ final class SpringWebExtractor {
             "HttpServletResponse", "ServerHttpRequest", "ServerHttpResponse", "ServerWebExchange", "HttpSession",
             "Locale", "BindingResult", "Model", "UriComponentsBuilder");
     private static final Set<String> QUERY_TYPES = Set.of("Pageable", "Sort");
-    private static final Set<String> HTTP_CLIENT_TYPES = Set.of("RestTemplate", "RestClient", "WebClient");
+    private static final Set<String> HTTP_CLIENT_TYPES = Set.of("RestClient", "WebClient");
+    private static final Set<String> REST_TEMPLATE_TYPES = Set.of("RestTemplate", "RestOperations");
+    private static final Map<String, String> REST_TEMPLATE_METHODS = Map.of(
+            "getForObject", "GET", "getForEntity", "GET", "postForObject", "POST", "postForEntity", "POST",
+            "postForLocation", "POST", "put", "PUT", "delete", "DELETE", "patchForObject", "PATCH",
+            "headForHeaders", "HEAD", "optionsForAllow", "OPTIONS");
+    /** RestTemplate methods taking the {@code HttpMethod} as second argument. */
+    private static final Set<String> REST_TEMPLATE_METHOD_ARGUMENT = Set.of("exchange", "execute");
+    private static final Set<String> HTTP_METHODS = Set.of(
+            "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE");
     private static final String UNRESOLVED_SEGMENT = "{unresolved}";
 
     private final Path root;
     private final SourceIndex index;
     private final ValueResolver resolver;
     private final GatewayRoutes gateway;
+    /** Host names a service is reached by: its application name and its module directory name. */
+    private final Map<String, String> serviceAliases = new HashMap<>();
 
     SpringWebExtractor(Path root, SourceIndex index, ValueResolver resolver, GatewayRoutes gateway) {
         this.root = root;
         this.index = index;
         this.resolver = resolver;
         this.gateway = gateway;
+        for (SourceIndex.Module service : index.services()) {
+            serviceAliases.putIfAbsent(service.dir().getFileName().toString(), service.name());
+        }
+        for (SourceIndex.Module service : index.services()) {
+            serviceAliases.put(service.name(), service.name());
+        }
     }
 
     Result extract(SourceIndex.Module module) {
@@ -79,7 +102,7 @@ final class SpringWebExtractor {
                             .ifPresent(feign -> feignClient(module, type, feign, clients, false));
                 }
             }
-            programmaticHttpCalls(module, unit, unresolved);
+            programmaticHttpCalls(module, unit, clients, unresolved);
         }
         // clients declared in a shared API module belong to the services that call them
         for (SourceIndex.Module library : index.modules()) {
@@ -142,7 +165,7 @@ final class SpringWebExtractor {
                         String id = "http:" + module.name() + ":" + client.getNameAsString() + "#"
                                 + method.getNameAsString() + ":" + httpMethod + " " + fullPath;
                         out.add(new HttpClientMethod(id, module.name(), target, url, httpMethod, fullPath, params,
-                                Ast.ref(method, root), callSites));
+                                Ast.ref(method, root), callSites, HttpClientMethod.FEIGN));
                     }
                 }
             }
@@ -165,8 +188,13 @@ final class SpringWebExtractor {
         return sites;
     }
 
-    private void programmaticHttpCalls(SourceIndex.Module module, CompilationUnit unit, List<Unresolved> out) {
+    private void programmaticHttpCalls(SourceIndex.Module module, CompilationUnit unit, List<HttpClientMethod> clients,
+                                       List<Unresolved> out) {
         for (MethodCallExpr call : unit.findAll(MethodCallExpr.class)) {
+            if (call.getScope().flatMap(this::clientType).filter(REST_TEMPLATE_TYPES::contains).isPresent()) {
+                restTemplateCall(module, call, clients, out);
+                continue;
+            }
             boolean outermostOfChain = call.getParentNode()
                     .filter(parent -> parent instanceof MethodCallExpr outer
                             && outer.getScope().filter(scope -> scope == call).isPresent())
@@ -178,15 +206,168 @@ final class SpringWebExtractor {
             while (receiver instanceof MethodCallExpr chained && chained.getScope().isPresent()) {
                 receiver = chained.getScope().get();
             }
-            Optional<String> type = Optional.empty();
-            if (receiver instanceof NameExpr name) {
-                type = resolver.declaredType(name);
-            } else if (receiver instanceof FieldAccessExpr field && field.getScope().isThisExpr()) {
-                type = resolver.fieldType(Ast.enclosingType(field), field.getNameAsString());
-            }
-            type.filter(HTTP_CLIENT_TYPES::contains).ifPresent(client -> out.add(new Unresolved(module.name(),
-                    "HTTP_CALL", client + " call: target URL is built at runtime and not modelled",
+            clientType(receiver).filter(HTTP_CLIENT_TYPES::contains).ifPresent(client -> out.add(new Unresolved(
+                    module.name(), "HTTP_CALL", client + " call: target URL is built at runtime and not modelled",
                     Ast.ref(call, root))));
+        }
+    }
+
+    private Optional<String> clientType(Expression receiver) {
+        if (receiver instanceof NameExpr name) {
+            return resolver.declaredType(name);
+        }
+        if (receiver instanceof FieldAccessExpr field && field.getScope().isThisExpr()) {
+            return resolver.fieldType(Ast.enclosingType(field), field.getNameAsString());
+        }
+        return Optional.empty();
+    }
+
+    // ------------------------------------------------------------------ RestTemplate
+
+    /**
+     * A request sent with {@code RestTemplate}: the URL (first argument) is evaluated to a template
+     * whose runtime parts are holes, and {@code http://<service>[:port]/<path>} gives the target
+     * service and path. The HTTP method comes from the method name or from the {@code HttpMethod}
+     * argument of {@code exchange}/{@code execute}. A call inside a private helper is resolved once
+     * per caller, with the values that caller passes, like publishers.
+     */
+    private void restTemplateCall(SourceIndex.Module module, MethodCallExpr call, List<HttpClientMethod> clients,
+                                  List<Unresolved> out) {
+        String name = call.getNameAsString();
+        boolean methodArgument = REST_TEMPLATE_METHOD_ARGUMENT.contains(name);
+        if (!methodArgument && !REST_TEMPLATE_METHODS.containsKey(name)) {
+            return; // configuration (getInterceptors, setErrorHandler...), not a request
+        }
+        CodeRef site = Ast.ref(call, root);
+        // exchange(url, method, entity, type, ...) / execute(url, method, callback, extractor, ...) vs
+        // exchange(RequestEntity, type)
+        if (call.getArguments().isEmpty() || (methodArgument && call.getArguments().size() < 3)) {
+            addOnce(out, new Unresolved(module.name(), "HTTP_CALL", "RestTemplate." + name
+                    + "(RequestEntity): URL and method are carried by a RequestEntity, not modelled", site));
+            return;
+        }
+        Expression url = uriArgument(call.getArgument(0));
+        for (ValueResolver.Ctx ctx : resolver.contextsFor(call)) {
+            MethodCallExpr originCall = ctx.originSite();
+            CodeRef origin = originCall == null ? site : Ast.ref(originCall, root);
+            String httpMethod = methodArgument ? httpMethod(call.getArgument(1), ctx) : REST_TEMPLATE_METHODS.get(name);
+            if (httpMethod == null) {
+                addOnce(out, new Unresolved(module.name(), "HTTP_CALL", "RestTemplate." + name
+                        + ": HTTP method not statically known in " + call.getArgument(1), origin));
+                continue;
+            }
+            for (String template : resolver.templates(url, ctx)) {
+                UrlTarget target = UrlTarget.parse(template);
+                if (target.problem() != null) {
+                    addOnce(out, new Unresolved(module.name(), "HTTP_CALL", "RestTemplate." + name + ": "
+                            + target.problem() + " in URL " + UrlTarget.display(template), origin));
+                    continue;
+                }
+                String service = serviceAliases.getOrDefault(target.host(), target.host());
+                String id = "http:" + module.name() + ":" + origin.label() + ":" + httpMethod + " " + service
+                        + target.path();
+                if (clients.stream().noneMatch(c -> c.id().equals(id))) {
+                    clients.add(new HttpClientMethod(id, module.name(), service, null, httpMethod, target.path(),
+                            List.of(), site, List.of(origin), HttpClientMethod.REST_TEMPLATE));
+                }
+            }
+        }
+    }
+
+    private static void addOnce(List<Unresolved> out, Unresolved unresolved) {
+        if (!out.contains(unresolved)) {
+            out.add(unresolved);
+        }
+    }
+
+    /**
+     * {@code URI.create(s)} and {@code new URI(s)} carry the URL string {@code s}.
+     */
+    private static Expression uriArgument(Expression argument) {
+        if (argument instanceof MethodCallExpr call && call.getNameAsString().equals("create")
+                && call.getArguments().size() == 1
+                && call.getScope().filter(s -> Ast.simpleName(s.toString()).equals("URI")).isPresent()) {
+            return call.getArgument(0);
+        }
+        if (argument instanceof ObjectCreationExpr creation && creation.getType().getNameAsString().equals("URI")
+                && creation.getArguments().size() == 1) {
+            return creation.getArgument(0);
+        }
+        return argument;
+    }
+
+    /**
+     * {@code HttpMethod.POST}, {@code HttpMethod.valueOf("POST")} or a statically imported
+     * {@code POST}; {@code null} when not statically known.
+     */
+    private String httpMethod(Expression expr, ValueResolver.Ctx ctx) {
+        if (expr instanceof FieldAccessExpr field && Ast.simpleName(field.getScope().toString()).equals("HttpMethod")) {
+            return field.getNameAsString();
+        }
+        if (expr instanceof MethodCallExpr call && call.getNameAsString().equals("valueOf")
+                && call.getArguments().size() == 1
+                && call.getScope().filter(s -> Ast.simpleName(s.toString()).equals("HttpMethod")).isPresent()) {
+            Set<String> values = resolver.strings(call.getArgument(0), ctx);
+            return values.size() == 1 ? values.iterator().next().toUpperCase(Locale.ROOT) : null;
+        }
+        if (expr instanceof NameExpr name && HTTP_METHODS.contains(name.getNameAsString())) {
+            return name.getNameAsString();
+        }
+        return null;
+    }
+
+    /**
+     * Target of a URL template: the {@code host} and the normalised {@code path}, in which every
+     * segment holding a runtime part is {@code {?}}; or the {@code problem} that prevents resolving it.
+     */
+    record UrlTarget(String host, String path, String problem) {
+
+        private static final Pattern URL = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]*://([^/]*)(.*)$", Pattern.DOTALL);
+        private static final String HOLE = String.valueOf(ValueResolver.HOLE);
+        static final String RUNTIME_SEGMENT = "{?}";
+
+        static UrlTarget parse(String template) {
+            String url = template;
+            for (char cut : new char[]{'?', '#'}) {
+                int at = url.indexOf(cut);
+                if (at >= 0) {
+                    url = url.substring(0, at);
+                }
+            }
+            Matcher matcher = URL.matcher(url);
+            if (!matcher.matches()) {
+                return problem(url.startsWith(HOLE) ? "base URL not statically known" : "not an absolute http URL");
+            }
+            String host = matcher.group(1);
+            host = host.substring(host.indexOf('@') + 1);
+            int port = host.indexOf(':');
+            if (port >= 0) {
+                host = host.substring(0, port);
+            }
+            String rawPath = matcher.group(2);
+            if (rawPath.isEmpty() && host.endsWith(HOLE) && host.indexOf(HOLE) == host.length() - 1
+                    && host.length() > 1) {
+                // "http://svc" + path
+                return problem("request path not statically known");
+            }
+            if (host.isEmpty() || host.contains(HOLE) || host.contains("{")) {
+                return problem("target host not statically known");
+            }
+            StringBuilder path = new StringBuilder();
+            for (String segment : rawPath.split("/")) {
+                if (!segment.isEmpty()) {
+                    path.append('/').append(segment.contains(HOLE) ? RUNTIME_SEGMENT : segment);
+                }
+            }
+            return new UrlTarget(host, Patterns.joinPaths(path.toString()), null);
+        }
+
+        static String display(String template) {
+            return template.replace(HOLE, RUNTIME_SEGMENT);
+        }
+
+        private static UrlTarget problem(String problem) {
+            return new UrlTarget(null, null, problem);
         }
     }
 
