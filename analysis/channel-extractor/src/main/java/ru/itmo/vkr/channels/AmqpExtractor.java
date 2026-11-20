@@ -9,8 +9,10 @@ import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.expr.ObjectCreationExpr;
 import ru.itmo.vkr.channels.model.CodeRef;
+import ru.itmo.vkr.channels.model.DeadLetter;
 import ru.itmo.vkr.channels.model.Listener;
 import ru.itmo.vkr.channels.model.Publisher;
 import ru.itmo.vkr.channels.model.QueueBinding;
@@ -18,8 +20,10 @@ import ru.itmo.vkr.channels.model.Unresolved;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -32,8 +36,8 @@ import java.util.Set;
  */
 final class AmqpExtractor {
 
-    record Result(List<Publisher> publishers, List<QueueBinding> bindings, List<Listener> listeners,
-                  List<Unresolved> unresolved) {
+    record Result(List<Publisher> publishers, List<QueueBinding> bindings, List<DeadLetter> deadLetters,
+                  List<Listener> listeners, List<Unresolved> unresolved) {
     }
 
     /**
@@ -51,6 +55,8 @@ final class AmqpExtractor {
     private static final Set<String> TEMPLATE_METHODS = Set.of(
             "convertAndSend", "send", "convertSendAndReceive", "convertSendAndReceiveAsType");
     private static final Set<String> NON_PAYLOAD_TYPES = Set.of("Message", "Channel", "MessageHeaders");
+    static final String DLX_ARGUMENT = "x-dead-letter-exchange";
+    static final String DLK_ARGUMENT = "x-dead-letter-routing-key";
     /** Exchange name of the AMQP default exchange, which routes by queue name. */
     static final String DEFAULT_EXCHANGE = "";
 
@@ -67,22 +73,31 @@ final class AmqpExtractor {
     Result extract(SourceIndex.Module module) {
         Set<Publisher> publishers = new LinkedHashSet<>();
         Set<QueueBinding> bindings = new LinkedHashSet<>();
+        Set<DeadLetter> deadLetters = new LinkedHashSet<>();
         List<Listener> listeners = new ArrayList<>();
         Set<Unresolved> unresolved = new LinkedHashSet<>();
         for (CompilationUnit unit : module.units()) {
             for (MethodCallExpr call : unit.findAll(MethodCallExpr.class)) {
                 publisher(module, call, publishers, unresolved);
                 builderBinding(module, call, bindings, unresolved);
+                builderDeadLetter(module, call, deadLetters, unresolved);
             }
             for (ObjectCreationExpr creation : unit.findAll(ObjectCreationExpr.class)) {
                 if (creation.getType().getNameAsString().equals("Binding") && creation.getArguments().size() >= 4) {
                     addBindings(module, creation, creation.getArgument(0), creation.getArgument(2),
                             creation.getArgument(3), bindings, unresolved);
                 }
+                if (creation.getType().getNameAsString().equals("Queue") && creation.getArguments().size() == 5) {
+                    // new Queue(name, durable, exclusive, autoDelete, arguments)
+                    Map<String, Expression> arguments = queueArguments(creation.getArgument(4));
+                    addDeadLetters(module, creation, creation.getArgument(0), arguments.get(DLX_ARGUMENT),
+                            arguments.get(DLK_ARGUMENT), deadLetters, unresolved);
+                }
             }
             listeners(module, unit, listeners, bindings, unresolved);
         }
-        return new Result(List.copyOf(publishers), List.copyOf(bindings), listeners, List.copyOf(unresolved));
+        return new Result(List.copyOf(publishers), List.copyOf(bindings), List.copyOf(deadLetters), listeners,
+                List.copyOf(unresolved));
     }
 
     // ------------------------------------------------------------------ publishers
@@ -201,6 +216,119 @@ final class AmqpExtractor {
                 for (String ex : exchanges) {
                     for (String k : keys) {
                         out.add(new QueueBinding(module.name(), q, ex, k, ref));
+                    }
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ dead letters
+
+    /**
+     * {@code QueueBuilder.durable(name).deadLetterExchange(x).deadLetterRoutingKey(k).build()}, also
+     * with {@code withArgument("x-dead-letter-exchange", x)} or {@code withArguments(map)}. Only
+     * the outermost call of the chain is inspected.
+     */
+    private void builderDeadLetter(SourceIndex.Module module, MethodCallExpr outer, Set<DeadLetter> out,
+                                   Set<Unresolved> unresolved) {
+        boolean outermost = outer.getParentNode()
+                .filter(parent -> parent instanceof MethodCallExpr call
+                        && call.getScope().filter(scope -> scope == outer).isPresent())
+                .isEmpty();
+        if (!outermost) {
+            return;
+        }
+        Map<String, Expression> arguments = new LinkedHashMap<>();
+        Expression chain = outer;
+        MethodCallExpr factory = null;
+        while (chain instanceof MethodCallExpr call) {
+            NodeList<Expression> args = call.getArguments();
+            switch (call.getNameAsString()) {
+                case "deadLetterExchange" -> {
+                    if (args.size() == 1) {
+                        arguments.putIfAbsent(DLX_ARGUMENT, args.get(0));
+                    }
+                }
+                case "deadLetterRoutingKey" -> {
+                    if (args.size() == 1) {
+                        arguments.putIfAbsent(DLK_ARGUMENT, args.get(0));
+                    }
+                }
+                case "withArgument" -> {
+                    if (args.size() == 2) {
+                        resolver.strings(args.get(0), ValueResolver.Ctx.root(null))
+                                .forEach(key -> arguments.putIfAbsent(key, args.get(1)));
+                    }
+                }
+                case "withArguments" -> {
+                    if (args.size() == 1) {
+                        queueArguments(args.get(0)).forEach(arguments::putIfAbsent);
+                    }
+                }
+                default -> {
+                }
+            }
+            if (call.getScope().filter(s -> Ast.simpleName(s.toString()).equals("QueueBuilder")).isPresent()) {
+                factory = call;
+            }
+            chain = call.getScope().orElse(null);
+        }
+        if (factory == null || factory.getArguments().isEmpty()) {
+            return;
+        }
+        addDeadLetters(module, outer, factory.getArgument(0), arguments.get(DLX_ARGUMENT), arguments.get(DLK_ARGUMENT),
+                out, unresolved);
+    }
+
+    /**
+     * Entries of a queue-arguments map: a local {@code Map} filled with {@code put} calls in the
+     * same method, or {@code Map.of(k1, v1, ...)}.
+     */
+    private Map<String, Expression> queueArguments(Expression map) {
+        Map<String, Expression> entries = new LinkedHashMap<>();
+        if (map instanceof MethodCallExpr call && call.getNameAsString().equals("of")
+                && call.getScope().filter(s -> s.toString().equals("Map")).isPresent()) {
+            for (int i = 0; i + 1 < call.getArguments().size(); i += 2) {
+                Expression value = call.getArgument(i + 1);
+                resolver.strings(call.getArgument(i), ValueResolver.Ctx.root(null))
+                        .forEach(key -> entries.putIfAbsent(key, value));
+            }
+        } else if (map instanceof NameExpr name && Ast.enclosingCallable(name) != null) {
+            for (MethodCallExpr put : Ast.enclosingCallable(name).findAll(MethodCallExpr.class)) {
+                if (put.getNameAsString().equals("put") && put.getArguments().size() == 2
+                        && put.getScope().filter(s -> s instanceof NameExpr n
+                                && n.getNameAsString().equals(name.getNameAsString())).isPresent()) {
+                    resolver.strings(put.getArgument(0), ValueResolver.Ctx.root(null))
+                            .forEach(key -> entries.putIfAbsent(key, put.getArgument(1)));
+                }
+            }
+        }
+        return entries;
+    }
+
+    private void addDeadLetters(SourceIndex.Module module, Node site, Expression queue, Expression exchange,
+                                Expression key, Set<DeadLetter> out, Set<Unresolved> unresolved) {
+        if (exchange == null) {
+            return;
+        }
+        for (ValueResolver.Ctx ctx : resolver.contextsFor(site)) {
+            MethodCallExpr originCall = ctx.originSite();
+            CodeRef ref = Ast.ref(originCall == null ? site : originCall, root);
+            Set<String> queues = resolver.strings(queue, ctx);
+            Set<String> exchanges = resolver.strings(exchange, ctx);
+            Set<String> keys = key == null ? null : resolver.strings(key, ctx);
+            if (queues.isEmpty() || exchanges.isEmpty() || (keys != null && keys.isEmpty())) {
+                unresolved.add(new Unresolved(module.name(), "DEAD_LETTER",
+                        "queue, dead-letter exchange or dead-letter routing key not statically known in " + site,
+                        ref));
+                continue;
+            }
+            for (String q : queues) {
+                for (String ex : exchanges) {
+                    if (keys == null) {
+                        out.add(new DeadLetter(module.name(), q, ex, null, ref));
+                    } else {
+                        keys.forEach(k -> out.add(new DeadLetter(module.name(), q, ex, k, ref)));
                     }
                 }
             }

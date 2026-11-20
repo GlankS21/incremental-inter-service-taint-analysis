@@ -227,6 +227,93 @@ final class ValueResolver {
         return Set.of();
     }
 
+    // ------------------------------------------------------------------ string templates
+
+    /** Stands for a part of a template whose value is only known at runtime. */
+    static final char HOLE = '\u0000';
+
+    /**
+     * Like {@link #strings}, but a part that cannot be resolved does not discard the whole value:
+     * it becomes a {@link #HOLE}, so {@code baseUrl + "/api/orders/" + id} still yields
+     * {@code "http://order-service/api/orders/" + HOLE}. Local variables also take the values
+     * assigned to them after their declaration (flow-insensitively, before the use).
+     */
+    Set<String> templates(Expression expr, Ctx ctx) {
+        if (ctx.depth() > MAX_DEPTH) {
+            return Set.of(String.valueOf(HOLE));
+        }
+        if (expr instanceof EnclosedExpr enclosed) {
+            return templates(enclosed.getInner(), ctx);
+        }
+        if (expr instanceof CastExpr cast) {
+            return templates(cast.getExpression(), ctx);
+        }
+        if (expr instanceof ConditionalExpr conditional) {
+            return union(templates(conditional.getThenExpr(), ctx), templates(conditional.getElseExpr(), ctx));
+        }
+        if (expr instanceof BinaryExpr binary && binary.getOperator() == BinaryExpr.Operator.PLUS) {
+            return concat(templates(binary.getLeft(), ctx), templates(binary.getRight(), ctx));
+        }
+        if (expr instanceof NameExpr name) {
+            Optional<Set<String>> variable = variableTemplates(name, ctx);
+            if (variable.isPresent()) {
+                return variable.get();
+            }
+        }
+        if (expr instanceof MethodCallExpr call) {
+            Optional<MethodDeclaration> target = sourceTarget(call);
+            if (target.isPresent() && target.get().getBody().isPresent()) {
+                MethodDeclaration method = target.get();
+                Ctx callee = new Ctx(method, bind(method, call.getArguments(), ctx), ctx, call, ctx.depth() + 1);
+                Set<String> values = new LinkedHashSet<>();
+                returns(method).forEach(r -> r.getExpression().ifPresent(e -> values.addAll(templates(e, callee))));
+                if (!values.isEmpty()) {
+                    return values;
+                }
+            }
+        }
+        Set<String> values = strings(expr, ctx);
+        return values.isEmpty() ? Set.of(String.valueOf(HOLE)) : values;
+    }
+
+    /**
+     * Templates of a local variable (initialiser and later assignments preceding the use) or of a
+     * parameter bound by the caller; empty when {@code name} is neither.
+     */
+    private Optional<Set<String>> variableTemplates(NameExpr name, Ctx ctx) {
+        CallableDeclaration<?> owner = Ast.enclosingCallable(name);
+        if (owner == null) {
+            return Optional.empty();
+        }
+        Optional<VariableDeclarator> local = localDeclarator(name, owner);
+        if (local.isPresent()) {
+            Position at = name.getBegin().orElse(null);
+            Set<String> values = new LinkedHashSet<>();
+            local.get().getInitializer().ifPresent(init -> values.addAll(templates(init, ctx)));
+            for (AssignExpr assign : owner.findAll(AssignExpr.class)) {
+                if (assign.getOperator() == AssignExpr.Operator.ASSIGN
+                        && assign.getTarget() instanceof NameExpr target
+                        && target.getNameAsString().equals(name.getNameAsString())
+                        && Ast.enclosingCallable(assign) == owner
+                        && at != null && assign.getBegin().map(b -> b.isBefore(at)).orElse(false)) {
+                    values.addAll(templates(assign.getValue(), ctx));
+                }
+            }
+            // String url = ""; if (...) url = a; else url = b;
+            if (values.size() > 1) {
+                values.remove("");
+            }
+            return Optional.of(values.isEmpty() ? Set.of(String.valueOf(HOLE)) : values);
+        }
+        BoundArg bound = bound(name.getNameAsString(), owner, ctx);
+        if (bound != null) {
+            Set<String> values = new LinkedHashSet<>();
+            bound.expressions().forEach(e -> values.addAll(templates(e, bound.ctx())));
+            return Optional.of(values.isEmpty() ? Set.of(String.valueOf(HOLE)) : values);
+        }
+        return Optional.empty();
+    }
+
     private Set<String> name(NameExpr name, Ctx ctx) {
         String id = name.getNameAsString();
         CallableDeclaration<?> owner = Ast.enclosingCallable(name);

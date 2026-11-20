@@ -297,6 +297,8 @@ class ChannelExtractorTest {
         assertThat(get.targetService()).isEqualTo("catalog-service");
         assertThat(get.path()).isEqualTo("/api/items/{id}");
         assertThat(get.callSites()).extracting(site -> site.method()).containsExactly("create");
+        assertThat(get.clientKind()).isEqualTo(HttpClientMethod.FEIGN);
+        assertThat(channels("HTTP")).allSatisfy(c -> assertThat(c.attributes()).containsEntry("clientKind", "FEIGN"));
 
         assertThat(channels("HTTP"))
                 .extracting(Channel::from, Channel::to)
