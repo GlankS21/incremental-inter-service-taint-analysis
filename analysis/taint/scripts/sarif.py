@@ -1,10 +1,11 @@
 """Writes the chains of an incremental.py report as SARIF 2.1.0 (GitHub code scanning and other viewers).
 
-One result per chain. The primary location is the sink (Class#method:line of the chain's last
-service); the code flow runs through the handler of every endpoint or listener the chain passes,
-whose file and line come from the channel model. Chains are fingerprinted without line numbers
-(incremental.chain_key), so a finding moved by an unrelated edit keeps its identity; with a
-baseline report, results carry baselineState new or unchanged.
+One result per finding (incremental.finding_key: entry point and sink method), so a flow printed
+once per source label and once per channel path is one alert. The primary location is the sink
+(Class#method:line of the finding's shortest chain); each chain is a code flow through the handler
+of every endpoint or listener it passes, whose file and line come from the channel model. The
+fingerprint is the finding key, which has no line numbers, so a finding moved by an unrelated edit
+keeps its identity; with a baseline report, results carry baselineState new or unchanged.
 
 usage: sarif.py <report.json> <channels.json> <project root> <out.sarif>
 """
@@ -15,7 +16,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from incremental import chain_key  # noqa: E402
+from incremental import chain_key, finding_key, group_findings  # noqa: E402
 
 RULES = {
     'CWE-89': ('SqlInjection', 'SQL injection',
@@ -90,15 +91,30 @@ def sink_file(index, cls, service, handler_file):
     return paths[0] if paths else None
 
 
+def representative(chains):
+    """The chain shown for a finding: the fewest hops, then the most specific source label."""
+    return min(chains, key=lambda c: (c.count('-->'), -len(parse(c)[0][0][3] or ''), c))
+
+
+def source_labels(chains):
+    """The distinct source labels of the entry point, in order of appearance."""
+    labels = []
+    for c in chains:
+        param = parse(c)[0][0][3]
+        if param and param not in labels:
+            labels.append(param)
+    return labels
+
+
 def to_sarif(report, model, root, baseline=None, uri_base=None):
     """uri_base: directory the uris are relative to (default: the git root above root)."""
     prefix = os.path.relpath(os.path.abspath(root), uri_base or git_root(root)).replace(os.sep, '/')
     prefix = '' if prefix == '.' else prefix + '/'
     handlers = {e['id']: e.get('handler') or {} for key in ('endpoints', 'listeners') for e in model.get(key, [])}
     index = java_files(root)
-    old = {chain_key(c) for c in baseline['chains']} if baseline else None
-    results = []
-    for chain in report['chains']:
+    old = {finding_key(c) for c in baseline['chains']} if baseline else None
+
+    def code_flow(chain):
         nodes, edges, cwe, cls, method, line = parse(chain)
         flow, last_file = [], None
         for i, (kind, service, name, param) in enumerate(nodes):
@@ -109,28 +125,40 @@ def to_sarif(report, model, root, baseline=None, uri_base=None):
                 what += f', then {edges[i][0]} {edges[i][1]}'
             if h.get('file'):
                 flow.append(location(h['file'], h.get('line'), what, prefix))
-        service = nodes[-1][1]
-        sink_uri = sink_file(index, cls, service, last_file)
+        sink_uri = sink_file(index, cls, nodes[-1][1], last_file)
         sink_text = f'{cwe} sink in {cls}#{method}'
         sink = location(sink_uri, line, sink_text, prefix) if sink_uri else {'message': {'text': sink_text}}
         if sink_uri:
             flow.append(sink)
+        return sink, flow
+
+    results = []
+    for finding in report.get('findings') or group_findings(report['chains']):
+        chains = finding['chains']
+        main = representative(chains)
+        nodes, edges, cwe, cls, method, line = parse(main)
+        sink, _ = code_flow(main)
+        flows = [f for f in (code_flow(c)[1] for c in [main] + [c for c in chains if c != main]) if f]
         services = [n[1] for n in nodes]
         entry = nodes[0]
+        sources = source_labels(chains)
         result = {
             'ruleId': cwe,
             'level': LEVEL.get(cwe, 'warning'),
             'message': {'text': f'{RULES.get(cwe, (cwe, cwe))[1]}: {entry[2]} ({entry[1]}) reaches '
                                 f'{cls}#{method}' + (f' across {len(services) - 1} service call(s): '
-                                                     f'{" -> ".join(services)}' if len(services) > 1 else '')},
+                                                     f'{" -> ".join(services)}' if len(services) > 1 else '')
+                                + (f'; source {", ".join(sources)}' if sources else '')
+                                + (f' ({len(chains)} chains)' if len(chains) > 1 else '')},
             'locations': [sink],
-            'partialFingerprints': {'vkrChain/v1': hashlib.sha256(chain_key(chain).encode()).hexdigest()},
-            'properties': {'chain': chain, 'crossService': len(services) > 1},
+            'partialFingerprints': {'vkrFinding/v1': hashlib.sha256(finding['key'].encode()).hexdigest()},
+            'properties': {'finding': finding['key'], 'chains': chains,
+                           'crossService': any('-->' in c for c in chains)},
         }
-        if flow:
-            result['codeFlows'] = [{'threadFlows': [{'locations': [{'location': l} for l in flow]}]}]
+        if flows:
+            result['codeFlows'] = [{'threadFlows': [{'locations': [{'location': l} for l in f]}]} for f in flows]
         if old is not None:
-            result['baselineState'] = 'unchanged' if chain_key(chain) in old else 'new'
+            result['baselineState'] = 'unchanged' if finding['key'] in old else 'new'
         results.append(result)
     used = sorted({r['ruleId'] for r in results} | set(RULES))
     rules = [{'id': r, 'name': RULES.get(r, (r,))[0],
