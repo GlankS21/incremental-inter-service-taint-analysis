@@ -29,3 +29,11 @@ bin/
 .DS_Store
 ### Python ###
 __pycache__/
+
+### IDE project files ###
+.idea/
+*.iml
+
+### Claude Code (local settings and worktrees) ###
+.claude/settings.local.json
+.claude/worktrees/
