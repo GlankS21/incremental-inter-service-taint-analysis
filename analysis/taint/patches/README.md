@@ -36,6 +36,15 @@ has no base variable and `TransferHandler.processTransfer` failed with a `ClassC
 to `base` at a static call site; any run that did not crash is unchanged. The jar built before it
 is kept as `build/micans-phantom.jar`.
 
+## `micans-dangling-classes.patch`
+
+With phantom references allowed, Soot leaves a class that a library only names in a signature at
+resolving level DANGLING. Soot's `jb` typing of a library body that stores into such a type then
+throws ("requires resolving level HIERARCHY but com.codahale.metrics.Gauge is at resolving level
+DANGLING", HikariCP's `CodaHaleMetricsTracker` without metrics-core; mall-swarm at 9ed1453, 4 of 6
+services). The patch sets Soot's `ignore_resolving_levels` together with `allow_phantom_refs`; a run
+that did not crash is unchanged. The jar built before it is kept as `build/micans-static.jar`.
+
 ## How to apply
 
 ```sh
@@ -43,6 +52,7 @@ cd <micans-source>
 patch -p1 < <repo>/analysis/taint/patches/micans-world-cache.patch
 patch -p1 < <repo>/analysis/taint/patches/micans-phantom-beans.patch
 patch -p1 < <repo>/analysis/taint/patches/micans-static-base-transfer.patch
+patch -p1 < <repo>/analysis/taint/patches/micans-dangling-classes.patch
 JAVA_HOME=<jdk-24> sh gradlew packageMicans   # writes build/micans.jar
 ```
 

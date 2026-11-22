@@ -1,0 +1,13 @@
+n,commit,date,subject,build_input_files,build,build_s,run_s,services,analysed,failed,chains,new,removed,unchecked
+0,9ed1453,2024-08-07,升级支持Spring Cloud 2023+Spring Boot 3.2+JDK 17,1,ok,38,2125,6,mall-admin mall-auth mall-demo mall-monitor mall-portal mall-search,,21,0,0,0
+1,4e0cd1c,2024-08-08,Update README.md,0,reused,0,158,6,,,21,0,0,0
+2,7a8897d,2024-08-08,添加Kubernetes运行效果图,0,reused,0,159,6,,,21,0,0,0
+3,815c348,2025-01-13,Update LICENSE,0,reused,0,158,6,,,21,0,0,0
+4,1582bf7,2025-01-13,Update README.md,0,reused,0,158,6,,,21,0,0,0
+5,01a4c8b,2025-01-26,前台商城登录逻辑修改,1,ok,44,798,6,mall-portal,,21,0,0,0
+6,56ed162,2025-04-18,Update docker-compose-env.yml,0,reused,0,158,6,,,21,0,0,0
+7,1815e88,2026-05-15,升级支持Spring Cloud 2025+Spring Boot 3.5,45,ok,66,2629,6,mall-admin mall-auth mall-demo mall-monitor mall-portal mall-search,,21,0,0,0
+8,a4ce2a4,2026-05-15,升级支持Spring Cloud 2025+Spring Boot 3.5,7,ok,37,3727,6,mall-admin mall-auth mall-demo mall-portal mall-search,,21,0,0,0
+9,19f43e2,2026-05-15,升级支持Spring Cloud 2025+Spring Boot 3.5,2,ok,39,171,6,,,21,0,0,0
+10,c91acdf,2026-05-21,升级支持Spring Cloud 2025+Spring Boot 3.5,4,ok,40,2756,6,mall-admin mall-auth mall-demo mall-monitor mall-portal mall-search,,21,0,0,0
+11,04c442f,2026-05-21,升级支持Spring Cloud 2025+Spring Boot 3.5,2,ok,37,2429,6,mall-admin mall-auth mall-demo mall-portal mall-search,,21,0,0,0

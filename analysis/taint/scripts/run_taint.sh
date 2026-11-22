@@ -18,7 +18,10 @@ rm -rf "$4"
 # Tai-e resolves the JRE model (java-benchmarks/JREs/jre1.8/rt.jar) relative to the working directory
 cd "${VKR_WORK:-$T/work}/jre-home" || exit 2
 start=$(date +%s)
+# zip64 validation (JDK 21+, JDK-8302483) rejects some old library jars, e.g. aspectjweaver-1.8.10
+# in train-ticket 2019; the check is off so their classes are read as before
 "$JAVA_HOME/bin/java" -Xmx${VKR_HEAP:-24g} -Xss512m ${VKR_DEBUG:+-Dvkr.debug=$VKR_DEBUG} \
+  -Djdk.util.zip.disableZip64ExtraFieldValidation=true \
   ${VKR_WORLD_CACHE:+-Dvkr.worldCache=$VKR_WORLD_CACHE} \
   -Dvkr.skipTaintGraph=${VKR_SKIP_TFG:-true} \
   -cp "$LC;$MJ" vkr.MicansTaintMain "$1" \

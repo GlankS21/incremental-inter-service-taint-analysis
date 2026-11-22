@@ -1,0 +1,2 @@
+cold run on the last commit: exit 0, 2804s
+equivalence: incremental 21 chains, cold 21, only incremental 0, only cold 0
