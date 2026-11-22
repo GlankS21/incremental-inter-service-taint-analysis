@@ -1,0 +1,12 @@
+--- a/src/main/java/pascal/taie/frontend/soot/SootWorldBuilder.java	2026-11-20 16:58:14.773412100 +0300
++++ b/src/main/java/pascal/taie/frontend/soot/SootWorldBuilder.java	2026-11-20 16:58:14.828589500 +0300
+@@ -108,6 +108,9 @@
+         }
+         if (options.isAllowPhantom()) {
+             soot.options.Options.v().set_allow_phantom_refs(true);
++            // vkr: a library class whose dependency is absent (HikariCP's CodaHaleMetricsTracker without
++            // metrics-core) is left DANGLING; without this, typing its body fails the whole run
++            soot.options.Options.v().set_ignore_resolving_levels(true);
+         }
+         if (options.isPreBuildIR()) {
+             // we need to set this option to false when pre-building IRs,
