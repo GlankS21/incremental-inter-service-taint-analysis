@@ -107,7 +107,12 @@ def run_key(svc, base, discovery):
         h.file(s, os.path.join(T, 'scripts', s))
     h.tree('launcher', os.path.join(T, 'launcher', 'src'), '.java')
     h.tree('jdk-stubs', os.path.join(T, 'jdk-stubs'), '.java')
-    h.file('micans', CFG['toolchain']['micans_jar'])
+    # entries, not bytes: a Micans jar rebuilt from the same source and patches (the Docker image after
+    # an Actions cache eviction) differs in its zip timestamps only
+    with zipfile.ZipFile(CFG['toolchain']['micans_jar']) as z:
+        for e in sorted(z.infolist(), key=lambda e: e.filename):
+            if not e.is_dir():
+                h.part(f'micans!{e.filename}', e.CRC.to_bytes(4, 'big'))
     h.file('jdk', os.path.join(CFG['toolchain']['java_home'], 'release'))
     h.part('cs', CFG['analysis']['context'].encode())
     return h.hexdigest()

@@ -60,8 +60,20 @@ def parse(chain):
     return nodes, edges, m.group(1), m.group(2), m.group(3), int(m.group(4))
 
 
-def location(uri, line, text):
-    loc = {'physicalLocation': {'artifactLocation': {'uri': uri, 'uriBaseId': '%SRCROOT%'}}}
+def git_root(path):
+    """The enclosing git work tree, whose root code scanning resolves SARIF uris against; else path."""
+    d = os.path.abspath(path)
+    while True:
+        if os.path.exists(os.path.join(d, '.git')):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            return os.path.abspath(path)
+        d = parent
+
+
+def location(uri, line, text, prefix=''):
+    loc = {'physicalLocation': {'artifactLocation': {'uri': prefix + uri, 'uriBaseId': '%SRCROOT%'}}}
     if line:
         loc['physicalLocation']['region'] = {'startLine': line}
     loc['message'] = {'text': text}
@@ -78,7 +90,10 @@ def sink_file(index, cls, service, handler_file):
     return paths[0] if paths else None
 
 
-def to_sarif(report, model, root, baseline=None):
+def to_sarif(report, model, root, baseline=None, uri_base=None):
+    """uri_base: directory the uris are relative to (default: the git root above root)."""
+    prefix = os.path.relpath(os.path.abspath(root), uri_base or git_root(root)).replace(os.sep, '/')
+    prefix = '' if prefix == '.' else prefix + '/'
     handlers = {e['id']: e.get('handler') or {} for key in ('endpoints', 'listeners') for e in model.get(key, [])}
     index = java_files(root)
     old = {chain_key(c) for c in baseline['chains']} if baseline else None
@@ -93,11 +108,11 @@ def to_sarif(report, model, root, baseline=None):
             if i < len(edges):
                 what += f', then {edges[i][0]} {edges[i][1]}'
             if h.get('file'):
-                flow.append(location(h['file'], h.get('line'), what))
+                flow.append(location(h['file'], h.get('line'), what, prefix))
         service = nodes[-1][1]
         sink_uri = sink_file(index, cls, service, last_file)
         sink_text = f'{cwe} sink in {cls}#{method}'
-        sink = location(sink_uri, line, sink_text) if sink_uri else {'message': {'text': sink_text}}
+        sink = location(sink_uri, line, sink_text, prefix) if sink_uri else {'message': {'text': sink_text}}
         if sink_uri:
             flow.append(sink)
         services = [n[1] for n in nodes]

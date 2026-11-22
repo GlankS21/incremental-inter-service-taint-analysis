@@ -2,7 +2,7 @@
 # usage: run_taint.sh <service> <workdir> <taint.yml> <outdir> <log> [cs]
 # env: MICANS_JAR (required: Micans build jar), JAVA_HOME (required: JDK running the analysis),
 #      VKR_HEAP (max heap, default 24g), VKR_DEBUG (DebugDump filter),
-#      VKR_WORK (work dir with the JRE model, default work/),
+#      VKR_WORK (work dir with the JRE model, default work/), VKR_JRE_HOME (a prebuilt JRE model instead),
 #      VKR_WORLD_CACHE (off|rw|ro, ADR-TCI-3: rw saves and loads the serialized World, ro only
 #      loads — a CI run on a PR must not write), VKR_SKIP_TFG (skip the taint-flow-graph dump,
 #      default true: the CI path reads only the flow lines)
@@ -21,7 +21,7 @@ MJ=$(wp "$MICANS_JAR")
 LC=$(wp "$T/launcher/classes")
 rm -rf "$4"
 # Tai-e resolves the JRE model (java-benchmarks/JREs/jre1.8/rt.jar) relative to the working directory
-cd "${VKR_WORK:-$T/work}/jre-home" || exit 2
+cd "${VKR_JRE_HOME:-${VKR_WORK:-$T/work}/jre-home}" || exit 2
 start=$(date +%s)
 # zip64 validation (JDK 21+, JDK-8302483) rejects some old library jars, e.g. aspectjweaver-1.8.10
 # in train-ticket 2019; the check is off so their classes are read as before

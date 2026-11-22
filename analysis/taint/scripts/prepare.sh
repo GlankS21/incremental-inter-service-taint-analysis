@@ -27,7 +27,8 @@ mkdir -p "$K"
 
 # JRE model: JDK classes downgraded to class version 61 for Micans' ASM 9.4, packed where Tai-e
 # looks for a Java 8 rt.jar; record bootstraps resolve through an analysis-only ObjectMethods stub
-RT="$K/jre-home/java-benchmarks/JREs/jre1.8/rt.jar"
+JH=${VKR_JRE_HOME:-$K/jre-home}   # a prebuilt model (the Docker image) is shared by all work dirs
+RT="$JH/java-benchmarks/JREs/jre1.8/rt.jar"
 if [ ! -f "$RT" ]; then
     MODS="java.base java.logging java.sql java.naming java.desktop java.management java.xml java.instrument java.compiler jdk.unsupported java.transaction.xa java.net.http java.scripting java.security.jgss java.rmi java.datatransfer java.prefs"
     INC=$(for m in $MODS; do printf "regex:/%s/.*," "$m"; done)

@@ -47,6 +47,11 @@ that did not crash is unchanged. The jar built before it is kept as `build/mican
 
 ## How to apply
 
+`build_micans.sh <out micans.jar> [micans-source.tar.xz]` does all of it: it downloads the source
+from Zenodo (10.5281/zenodo.15050505, AGPL-3.0) unless a copy is given, checks its sha256, applies
+the four patches in this order, and builds with Gradle (JAVA_HOME: JDK 17). The Dockerfile uses it.
+By hand:
+
 ```sh
 cd <micans-source>
 patch -p1 < <repo>/analysis/taint/patches/micans-world-cache.patch
