@@ -1,5 +1,6 @@
 """SARIF output of a report: sink location, code flow through the endpoints' handlers, baseline state."""
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -47,6 +48,15 @@ class SarifTest(unittest.TestCase):
         self.assertEqual(self.result({'chains': []})['baselineState'], 'new')
         doc = sarif.to_sarif({'chains': [moved], 'failed': []}, MODEL, self.root)
         self.assertEqual(doc['runs'][0]['results'][0]['partialFingerprints'], self.result()['partialFingerprints'])
+
+    def test_uris_are_relative_to_the_git_root_above_the_project(self):
+        repo = tempfile.mkdtemp()
+        os.makedirs(os.path.join(repo, '.git'))
+        project = os.path.join(repo, 'services', 'backend')
+        shutil.copytree(self.root, project)
+        doc = sarif.to_sarif({'chains': [CHAIN], 'failed': []}, MODEL, project)
+        uri = doc['runs'][0]['results'][0]['locations'][0]['physicalLocation']['artifactLocation']['uri']
+        self.assertEqual(uri, 'services/backend/order-service/src/main/java/order/OrderRepository.java')
 
     def test_failed_service_marks_the_run_unsuccessful(self):
         doc = sarif.to_sarif({'chains': [], 'failed': ['order-service']}, MODEL, self.root)
