@@ -3,7 +3,7 @@
     vkr-taint <repo> [--build auto|mvn|docker|none] [--baseline report.json] [--gate] [--out DIR]
 
 1. configuration: <repo>/vkr-taint.yml when present (or --config); otherwise one is generated in
-   the work dir with everything detected (services, shared modules, sources, sinks cwe-89 and cwe-117)
+   the work dir with everything detected (services, shared modules, sources, the sinks of every built-in catalogue)
 2. build (the tool needs target/classes and the Spring Boot jar of each service):
      auto    build with Maven when a service has no built artifacts, else use them
      mvn     <repo>/mvnw or mvn on this machine: -B -DskipTests package (trusted code, e.g. CI)
@@ -43,7 +43,7 @@ project:
 services: auto
 shared: auto
 taint:
-  sinks: [cwe-89, cwe-117]
+  sinks: [cwe-89, cwe-117, cwe-79, cwe-918, cwe-1336]
   sources: auto
   discovery: annotations
 analysis:

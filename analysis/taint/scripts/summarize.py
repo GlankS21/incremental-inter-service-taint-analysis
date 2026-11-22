@@ -18,8 +18,10 @@ import re
 import subprocess
 import sys
 
-# TaintFlow{source -> sink call}; StoreFlow{source -> <Entity: T field>} (vkr.plugin.SpringDataModel)
-ANY_FLOW = re.compile(r'^(TaintFlow|StoreFlow)\{(.*?) -> (<.*)\}$')
+# TaintFlow{source -> sink call}; StoreFlow{source -> <Entity: T field>} (vkr.plugin.SpringDataModel);
+# ResponseFlow{source -> <Handler: R m(..)>@L<line>} (vkr.plugin.ResponseBodySink, CWE-79)
+ANY_FLOW = re.compile(r'^(TaintFlow|StoreFlow|ResponseFlow)\{(.*?) -> (<.*)\}$')
+RESPONSE_SITE = re.compile(r'^<([^:]+): \S+ ([^(]+)\([^)]*\)>@L(-?\d+)$')
 # param source:  <Handler: R m(..)>/1
 PARAM_SRC = re.compile(r'^<([^:]+): \S+ ([^(]+)\(([^)]*)\)>/(\S+)$')
 # field source:  <accessor()> [i@Ln] $r = %this.<Dto: T field>
@@ -42,6 +44,11 @@ OUTBOX_METHODS = {m for _, m in DISCOVERY.get('outboxSinks', [])} or {'enqueue'}
 REST_TEMPLATE_CALL = re.compile(r'\.(exchange|postForObject|postForEntity|getForObject|getForEntity|put|delete)\(')
 LOGGER_CALL = re.compile(r'\.(trace|debug|info|warn|error)\(')
 SQL_CALL = re.compile(r'\.(createNativeQuery|createQuery|query\w*|update|execute)\(')
+# the other built-in catalogues (gen_taint_config.CATALOGUES cwe-918, cwe-1336)
+SSRF_CALL = re.compile(r'\.(openConnection|openStream|newBuilder|uri)\(')
+TEMPLATE_CALL = re.compile(r'\.(process|evaluate)\(')
+# constructors that are sinks of a catalogue: the call prints no class, the caller's bytecode tells
+CTOR_SINKS = {'freemarker/template/Template': 'CWE-1336'}
 # MyBatis mapper methods whose XML statement splices a parameter with ${} (gen_taint_config.py)
 MYBATIS_METHODS = {m for _, m in DISCOVERY.get('mybatisSinks', [])}
 
@@ -62,6 +69,21 @@ def javap(classpath, cls):
         _javap_cache[key] = subprocess.run([JAVAP, '-p', '-cp', classpath, cls],
                                            capture_output=True, text=True).stdout
     return _javap_cache[key]
+
+
+def constructed(classpath, cls, method):
+    """Classes (internal names) whose constructor cls#method calls."""
+    key = (classpath, cls, '-c')
+    if key not in _javap_cache:
+        _javap_cache[key] = subprocess.run([JAVAP, '-p', '-c', '-cp', classpath, cls],
+                                           capture_output=True, text=True).stdout
+    found, inside = set(), False
+    for line in _javap_cache[key].splitlines():
+        if line.startswith('  ') and not line.startswith('    ') and '(' in line:  # a method declaration
+            inside = re.search(rf'[ .]{re.escape(method)}\(', line) is not None
+        elif inside and (m := re.search(r'// Method (\S+)\."<init>"', line)):
+            found.add(m.group(1))
+    return found
 
 
 def record_fields(classpath, cls):
@@ -188,6 +210,11 @@ def summary(service, log_path, model_path, out_path, app_dir, common_dir):
             entry_ids = field_entries(dto_cls) or [f'field:{src_in}']
         else:
             continue
+        if kind == 'ResponseFlow':
+            site_cls, site_m, line = RESPONSE_SITE.match(sink).groups()
+            exits = [{'kind': 'LOCAL', 'cwe': 'CWE-79', 'site': f'{site_cls.rsplit(".", 1)[1]}#{site_m}:{line}'}]
+            add_exits(entries, entry_ids, src_in, exits)
+            continue
         if kind == 'StoreFlow':
             entity, field = STORE_FIELD.match(sink).groups()
             entity = entity.rsplit('.', 1)[1]
@@ -205,7 +232,11 @@ def summary(service, log_path, model_path, out_path, app_dir, common_dir):
         site = f'{sink_cls.rsplit(".", 1)[1]}#{sink_m}:{sink_line}'
         ctor = CTOR_CALL.search(call)
         callee = re.search(r'\.(\w+)\(', call).group(1) if not ctor else '<init>'
-        if ctor:
+        ctor_cwe = [cwe for owner, cwe in CTOR_SINKS.items() if owner in constructed(app_dir, sink_cls, sink_m)] \
+            if ctor else []
+        if ctor_cwe:
+            exits = [{'kind': 'LOCAL', 'cwe': ctor_cwe[0], 'site': site}]
+        elif ctor:
             argc = len([a for a in ctor.group(1).split(',') if a.strip()])
             exits = []
             for event_cls in event_class_at(sink_cls, sink_m, argc):
@@ -230,6 +261,10 @@ def summary(service, log_path, model_path, out_path, app_dir, common_dir):
             exits = [{'kind': 'LOCAL', 'cwe': 'CWE-117', 'site': site}]
         elif SQL_CALL.search(call) or callee in MYBATIS_METHODS:
             exits = [{'kind': 'LOCAL', 'cwe': 'CWE-89', 'site': site}]
+        elif SSRF_CALL.search(call):
+            exits = [{'kind': 'LOCAL', 'cwe': 'CWE-918', 'site': site}]
+        elif TEMPLATE_CALL.search(call):
+            exits = [{'kind': 'LOCAL', 'cwe': 'CWE-1336', 'site': site}]
         else:
             exits = [{'kind': 'UNKNOWN', 'site': site, 'call': call}]
         add_exits(entries, entry_ids, src_in, exits)

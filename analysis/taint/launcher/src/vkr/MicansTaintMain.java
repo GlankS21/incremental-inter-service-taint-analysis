@@ -38,6 +38,7 @@ public final class MicansTaintMain {
             "vkr.plugin.FreshEntityBarrier",
             "vkr.plugin.JdkTaintBarrier",
             "vkr.plugin.ListenerEntryPoints",
+            "vkr.plugin.ResponseBodySink",
             "vkr.plugin.DebugDump");
 
     private MicansTaintMain() {
