@@ -44,6 +44,8 @@ class InventoryServiceImplTest {
     private StockMovementRepository stockMovementRepository;
     @Mock
     private StockLevelNotifier stockLevelNotifier;
+    @Mock
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     private InventoryServiceImpl service;
     private final UUID adminId = UUID.randomUUID();
@@ -51,7 +53,8 @@ class InventoryServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new InventoryServiceImpl(inventoryItemRepository, stockMovementRepository, new InventoryMapperImpl(),
-                new InventoryProperties(7, null), new CommonMessagesAutoConfiguration().messageSource(), stockLevelNotifier);
+                new InventoryProperties(7, null), new CommonMessagesAutoConfiguration().messageSource(), stockLevelNotifier,
+                jdbcTemplate);
     }
 
     @Test

@@ -55,7 +55,7 @@ class CartServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new CartServiceImpl(cartRepository, productCatalog, new CartProperties(2, 5),
+        service = new CartServiceImpl(cartRepository, productCatalog, mock(com.shop.cart.client.WarehouseClient.class), new CartProperties(2, 5),
                 new TransactionTemplate(mock(PlatformTransactionManager.class)));
     }
 
@@ -131,7 +131,7 @@ class CartServiceImplTest {
         when(cartRepository.findByUserIdForUpdate(USER)).thenReturn(Optional.of(cart));
         when(cartRepository.findByUserId(USER)).thenReturn(Optional.of(cart));
 
-        service.addItem(USER, new AddCartItemRequest(1L, 3));
+        service.addItem(USER, new AddCartItemRequest(1L, 3, null));
 
         CartItem item = cart.getItems().getFirst();
         assertThat(item.getQuantity()).isEqualTo(5);
@@ -145,20 +145,20 @@ class CartServiceImplTest {
         when(cartRepository.findByUserIdForUpdate(USER)).thenReturn(Optional.of(cart()));
 
         when(productCatalog.findAvailability(anyCollection())).thenReturn(Optional.of(Map.of(1L, 2)));
-        assertThatThrownBy(() -> service.addItem(USER, new AddCartItemRequest(1L, 3)))
+        assertThatThrownBy(() -> service.addItem(USER, new AddCartItemRequest(1L, 3, null)))
                 .isInstanceOf(BusinessException.class).hasMessage(CartServiceImpl.INSUFFICIENT_STOCK)
                 .extracting(ex -> ((BusinessException) ex).getMessageArgs())
                 .isEqualTo(new Object[]{"Товар 1", 2, RussianPlural.FEW});
 
         when(productCatalog.findAvailability(anyCollection())).thenReturn(Optional.of(Map.of()));
-        assertThatThrownBy(() -> service.addItem(USER, new AddCartItemRequest(1L, 1)))
+        assertThatThrownBy(() -> service.addItem(USER, new AddCartItemRequest(1L, 1, null)))
                 .isInstanceOf(BusinessException.class).hasMessage(CartServiceImpl.OUT_OF_STOCK)
                 .extracting(ex -> ((BusinessException) ex).getMessageArgs())
                 .isEqualTo(new Object[]{"Товар 1"});
 
         // Unknown stock is accepted, but never above the per-line limit
         when(productCatalog.findAvailability(anyCollection())).thenReturn(Optional.empty());
-        assertThatThrownBy(() -> service.addItem(USER, new AddCartItemRequest(1L, 6)))
+        assertThatThrownBy(() -> service.addItem(USER, new AddCartItemRequest(1L, 6, null)))
                 .isInstanceOf(BadRequestException.class).hasMessage(CartServiceImpl.QUANTITY_LIMIT)
                 .extracting(ex -> ((BadRequestException) ex).getMessageArgs())
                 .isEqualTo(new Object[]{5, RussianPlural.MANY});
@@ -172,7 +172,7 @@ class CartServiceImplTest {
         when(cartRepository.findByUserIdForUpdate(USER))
                 .thenReturn(Optional.of(cart(line(1L, 1, "1000"), line(2L, 1, "1000"))));
 
-        assertThatThrownBy(() -> service.addItem(USER, new AddCartItemRequest(3L, 1)))
+        assertThatThrownBy(() -> service.addItem(USER, new AddCartItemRequest(3L, 1, null)))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(CartServiceImpl.TOO_MANY_PRODUCTS)
                 .extracting(ex -> ((BusinessException) ex).getMessageArgs())
@@ -183,7 +183,7 @@ class CartServiceImplTest {
     void addItem_rejectsProductsThatAreNotSold() {
         when(productCatalog.findSellableProducts(anyCollection())).thenReturn(Map.of());
 
-        assertThatThrownBy(() -> service.addItem(USER, new AddCartItemRequest(9L, 1)))
+        assertThatThrownBy(() -> service.addItem(USER, new AddCartItemRequest(9L, 1, null)))
                 .isInstanceOf(BusinessException.class).hasMessage(CartServiceImpl.PRODUCT_NOT_AVAILABLE);
     }
 

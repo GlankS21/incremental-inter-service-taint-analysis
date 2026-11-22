@@ -260,11 +260,11 @@ class CartIntegrationTest {
         try {
             Future<?> first = executor.submit(() -> {
                 start.await();
-                return cartService.addItem(customerId, new AddCartItemRequest(7L, 1));
+                return cartService.addItem(customerId, new AddCartItemRequest(7L, 1, null));
             });
             Future<?> second = executor.submit(() -> {
                 start.await();
-                return cartService.addItem(customerId, new AddCartItemRequest(19L, 1));
+                return cartService.addItem(customerId, new AddCartItemRequest(19L, 1, null));
             });
             start.countDown();
             first.get(15, TimeUnit.SECONDS);
