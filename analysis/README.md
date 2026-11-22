@@ -26,8 +26,10 @@ How it works:
    scripts, the Micans jar and the JDK. On a commit, a service whose key is unchanged is not run
    again, and a rebuilt jar with the same code is a hit.
 4. **Composition.** The per-service summaries are joined along the channel model into chains to a
-   sink. This is cheap and runs every time. Chains are compared with a baseline report without line
-   numbers, so moved code is not a new finding.
+   sink. This is cheap and runs every time. The chains of one entry point and one sink method form a
+   finding: the same flow is printed once per granularity of the source (`<0>`, `<0/warehouse>`,
+   `<AddCartItemRequest.warehouse>`) and once per path through the channels. Findings are compared
+   with a baseline report without line numbers, so moved code is not a new finding.
 
 On the history of two public systems, the incremental result equals a cold full analysis at the
 last commit: mall-swarm, 12 commits, 21 = 21 chains, 2.3× less analysis time; train-ticket,
@@ -64,8 +66,8 @@ The action:
 - on a pull request, compares the result with the baseline stored by the last push to the default
   branch;
 - uploads `vkr-taint.sarif` to code scanning;
-- fails with `gate: 'true'` (the default) on a new chain or on a service that could not be
-  analysed.
+- fails with `gate: 'true'` (the default) on a new finding or on a service that could not
+  be analysed.
 
 [`.github/workflows/taint.yml`](../.github/workflows/taint.yml) runs it on the testbed of this
 repository. The first run of a system is a full analysis, which takes minutes per service.
@@ -75,7 +77,7 @@ repository. The first run of a system is a full analysis, which takes minutes pe
 | `path` | `.` | project root, relative to the workspace |
 | `config` | `<path>/vkr-taint.yml`, else generated | configuration file |
 | `services` | all | comma-separated subset |
-| `gate` | `true` | fail on new chains or a failed service |
+| `gate` | `true` | fail on new findings or a failed service |
 | `heap` | `12g` | Micans heap (a hosted runner has 16 GB) |
 | `upload-sarif` | `true` | needs `security-events: write`; set `false` for pull requests from forks |
 | `baseline-branch` | default branch | pushes to it store the baseline |
@@ -163,7 +165,9 @@ testbed); [`experiments/public/*.vkr-taint.yml`](experiments/public) (train-tick
 Fields of `vkr-taint-report.json`:
 
 - `chains`: every chain to a sink;
-- `new`, `removed`: compared with `--baseline`;
+- `findings`: the chains grouped by entry point and sink method (`key`, `chains`);
+- `newFindings`, `removedFindings`: finding keys compared with `--baseline`, which the gate uses;
+- `new`, `removed`: chains compared with `--baseline`;
 - `unchecked`: baseline chains through a service that failed now;
 - `failed`: services that could not be analysed;
 - `services`: per service, the run key and whether the run and summary came from the cache, and
@@ -171,16 +175,16 @@ Fields of `vkr-taint-report.json`:
 
 In `vkr-taint.sarif`:
 
-- each chain is one result, located at the sink;
-- `codeFlows` go through each endpoint's handler;
+- each finding is one result, located at the sink, with its source labels in the message;
+- `codeFlows`, one per chain of the finding, go through each endpoint's handler;
 - `partialFingerprints` do not change when only line numbers change;
 - `baselineState` is `new` or `unchanged`;
 - rules carry `security-severity` for code scanning.
 
 | Exit code | |
 |---|---|
-| 0 | done (and with `--gate`: no new chain, every service analysed) |
-| 1 | `--gate`: new chains |
+| 0 | done (and with `--gate`: no new finding, every service analysed) |
+| 1 | `--gate`: new findings |
 | 2 | `--gate`: a service could not be analysed, so its chains are missing |
 | 3 | configuration or build error |
 
