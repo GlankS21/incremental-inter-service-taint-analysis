@@ -19,8 +19,10 @@ docker pull -q "$img" > /dev/null
 digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$img")
 commit=$(git -C "$src" rev-parse HEAD)
 export MSYS_NO_PATHCONV=1   # from here on Git Bash must not rewrite the container paths
-src=$(cygpath -w "$src")
-dst=$(cygpath -w "$dst")
+if command -v cygpath > /dev/null 2>&1; then   # Git Bash: docker.exe needs Windows paths
+    src=$(cygpath -w "$src")
+    dst=$(cygpath -w "$dst")
+fi
 # the Maven cache is a named volume shared by the builds, never the host ~/.m2
 cid=$(docker create --memory 6g --cpus 4 -v vkr-public-m2:/root/.m2 -w /src "$img" \
     mvn -B -q -DskipTests -Dmaven.test.skip=true "$@" package)

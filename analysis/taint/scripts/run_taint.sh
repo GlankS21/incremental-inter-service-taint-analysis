@@ -11,9 +11,14 @@ T=$(cd "$(dirname "$0")/.." && pwd)
 : "${JAVA_HOME:?JAVA_HOME is not set (a JDK home; vkr-taint.yml toolchain.java-home)}"
 : "${MICANS_JAR:?MICANS_JAR is not set (the Micans build jar; vkr-taint.yml toolchain.micans-jar)}"
 [ -f "$MICANS_JAR" ] || { echo "MICANS_JAR: file not found: $MICANS_JAR" >&2; exit 2; }
-W=$(cygpath -w "$2")
-MJ=$(cygpath -w "$MICANS_JAR")
-LC=$(cygpath -w "$T/launcher/classes")
+# Git Bash on Windows: the JVM needs Windows paths and ';' between classpath entries; Linux: as is
+if command -v cygpath > /dev/null 2>&1; then
+  wp() { cygpath -w "$1"; }; CPSEP=';'
+else
+  wp() { printf '%s' "$1"; }; CPSEP=':'
+fi
+MJ=$(wp "$MICANS_JAR")
+LC=$(wp "$T/launcher/classes")
 rm -rf "$4"
 # Tai-e resolves the JRE model (java-benchmarks/JREs/jre1.8/rt.jar) relative to the working directory
 cd "${VKR_WORK:-$T/work}/jre-home" || exit 2
@@ -24,6 +29,7 @@ start=$(date +%s)
   -Djdk.util.zip.disableZip64ExtraFieldValidation=true \
   ${VKR_WORLD_CACHE:+-Dvkr.worldCache=$VKR_WORLD_CACHE} \
   -Dvkr.skipTaintGraph=${VKR_SKIP_TFG:-true} \
-  -cp "$LC;$MJ" vkr.MicansTaintMain "$1" \
-  "$W\app,$W\common" "$W\lib,@$W\libjars.txt" "$(cygpath -w "$3")" "$(cygpath -w "$4")" ${6:-ci} > "$5" 2>&1
+  -cp "$LC$CPSEP$MJ" vkr.MicansTaintMain "$1" \
+  "$(wp "$2/app"),$(wp "$2/common")" "$(wp "$2/lib"),@$(wp "$2/libjars.txt")" "$(wp "$3")" "$(wp "$4")" \
+  ${6:-ci} > "$5" 2>&1
 echo "exit=$? seconds=$(( $(date +%s) - start ))" | tee -a "$5"

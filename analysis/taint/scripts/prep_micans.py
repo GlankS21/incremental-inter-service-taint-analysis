@@ -8,8 +8,9 @@ classes newer than Micans' ASM 9.4 can read is extracted to <workdir>/lib instea
 usage: prep_micans.py <workdir>"""
 import sys, os, zipfile, struct
 
-# \\?\ prefix lifts the Windows 260-char path limit
-W = '\\\\?\\' + os.path.abspath(sys.argv[1])
+# on Windows the \\?\ prefix lifts the 260-char path limit
+PFX = '\\\\?\\' if os.name == 'nt' else ''
+W = PFX + os.path.abspath(sys.argv[1])
 libdir = os.path.join(W, 'bootjar', 'BOOT-INF', 'lib')
 common = os.path.join(W, 'common')
 lib = os.path.join(W, 'lib')
@@ -40,7 +41,7 @@ for jar in sorted(os.listdir(libdir)):
     with zipfile.ZipFile(path) as z:
         names = classes(z)
         if not shared(jar) and not any(too_new(z.open(n).read(8)) for n in names):
-            jars.append(path[4:])  # without \\?\: the list is read by Java
+            jars.append(path[len(PFX):])  # without \\?\: the list is read by Java
             continue
         dest = common if shared(jar) else lib
         for n in names:

@@ -1,0 +1,12 @@
+#!/bin/sh
+# vkr-taint <repo> [options]: incremental inter-service taint analysis, see analysis/taint/scripts/vkr_taint.py
+# needs: JAVA_HOME (JDK 21+), VKR_MICANS_JAR, python3 (3.9+, no packages), sh, unzip; docker for --build docker
+D=$(cd "$(dirname "$0")" && pwd)
+# the first interpreter that runs (on Windows "python3" may be the Microsoft Store stub)
+for PY in "$VKR_PYTHON" python3 python; do
+  [ -n "$PY" ] && "$PY" -c 'import sys; sys.exit(sys.version_info < (3, 9))' > /dev/null 2>&1 && break
+  PY=
+done
+[ -n "$PY" ] || { echo "vkr-taint: no python3 (3.9+) found; set VKR_PYTHON" >&2; exit 3; }
+export VKR_PYTHON="$PY"
+exec "$PY" -I "$D/taint/scripts/vkr_taint.py" "$@"

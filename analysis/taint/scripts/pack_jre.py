@@ -2,8 +2,8 @@ import os, struct, sys, zipfile
 
 # Packs extracted JDK module classes into one rt.jar whose class headers are
 # downgraded to Java 17 (61), so Micans' ASM 9.4 / Soot can load them as the JRE model.
-# \\?\ prefix lifts the Windows 260-char path limit
-src = '\\\\?\\' + os.path.abspath(sys.argv[1])
+# on Windows the \\?\ prefix lifts the 260-char path limit
+src = ('\\\\?\\' if os.name == 'nt' else '') + os.path.abspath(sys.argv[1])
 out_jar = sys.argv[2]
 os.makedirs(os.path.dirname(out_jar), exist_ok=True)
 seen = set()

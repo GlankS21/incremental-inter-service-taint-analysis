@@ -1,7 +1,7 @@
 # vkr-taint configuration of train-ticket (FudanSELab), built by build_public.sh into VKR_PUBLIC_BUILD.
 version: 1
 project:
-  root: ${VKR_PUBLIC_BUILD:-${LOCALAPPDATA}/vkr-exp/build}/train-ticket
+  root: ${VKR_PUBLIC_BUILD:-${VKR_EXP}/build}/train-ticket
   gateway-config: auto
 services: auto
 shared: [ts-common]   # auto also picks the unbuilt modules under old-docs/
