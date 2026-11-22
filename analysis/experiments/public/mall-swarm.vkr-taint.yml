@@ -1,7 +1,7 @@
 # vkr-taint configuration of mall-swarm (macrozheng), built by build_public.sh into VKR_PUBLIC_BUILD.
 version: 1
 project:
-  root: ${VKR_PUBLIC_BUILD:-${LOCALAPPDATA}/vkr-exp/build}/mall-swarm
+  root: ${VKR_PUBLIC_BUILD:-${VKR_EXP}/build}/mall-swarm
   gateway-config: auto
 services: auto
 shared: auto

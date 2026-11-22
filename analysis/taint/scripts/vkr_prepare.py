@@ -41,6 +41,7 @@ def tool_env(cfg):
     env['VKR_HEAP'] = cfg['analysis']['heap']
     env['VKR_WORLD_CACHE'] = cfg['analysis']['world_cache']
     env['PYTHONUTF8'] = '1'
+    env['VKR_PYTHON'] = sys.executable  # the shell scripts run Python helpers with this interpreter
     return env
 
 

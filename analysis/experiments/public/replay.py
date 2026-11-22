@@ -12,7 +12,8 @@ Reruns resume: a commit whose report exists is not built or analysed again.
 usage: replay.py <clone> <first> <last> --config <vkr-taint.yml> --image <maven image>
                  [--mvn-arg ARG ...] [--cold-check]
        the config's project.root must be ${VKR_PUBLIC_BUILD}/<clone dir name>
-output: $LOCALAPPDATA/vkr-exp/replay/<name>/  (NN-<commit>.json reports, replay.csv, *.log)
+output: $VKR_EXP/replay/<name>/ (VKR_EXP: default $LOCALAPPDATA/vkr-exp, else ~/.cache/vkr-exp)
+         (NN-<commit>.json reports, replay.csv, *.log)
 env:   JAVA_HOME, VKR_MICANS_JAR as for incremental.py
 """
 import argparse
@@ -26,7 +27,9 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPTS = os.path.join(HERE, os.pardir, os.pardir, 'taint', 'scripts')
-L = os.path.join(os.environ['LOCALAPPDATA'], 'vkr-exp')
+# experiment data stays outside the repo (and outside synced folders such as OneDrive)
+L = os.environ.get('VKR_EXP') or (os.path.join(os.environ['LOCALAPPDATA'], 'vkr-exp') if os.environ.get('LOCALAPPDATA')
+                                  else os.path.join(os.path.expanduser('~'), '.cache', 'vkr-exp'))
 FIELDS = ['n', 'commit', 'date', 'subject', 'build_input_files', 'build', 'build_s', 'run_s', 'services',
           'analysed', 'failed', 'chains', 'new', 'removed', 'unchecked']
 

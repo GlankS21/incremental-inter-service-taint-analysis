@@ -1,0 +1,3 @@
+# shell scripts run on Linux (CI, the Docker image) even when checked out on Windows
+*.sh text eol=lf
+vkr-taint text eol=lf

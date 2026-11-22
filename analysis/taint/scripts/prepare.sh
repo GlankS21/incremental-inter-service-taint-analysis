@@ -12,6 +12,8 @@ T=$(cd "$(dirname "$0")/.." && pwd)
 : "${JAVA_HOME:?JAVA_HOME is not set (a JDK home; vkr-taint.yml toolchain.java-home)}"
 export JAVA_HOME
 K=${VKR_WORK:-"$T/work"}
+PY=${VKR_PYTHON:-python3}   # incremental.py passes its own interpreter
+if command -v cygpath > /dev/null 2>&1; then wp() { cygpath -w "$1"; }; else wp() { printf '%s' "$1"; }; fi
 if [ "$1" != "--jre-only" ]; then
     svc=$1
     CLASSES=$2
@@ -30,10 +32,10 @@ if [ ! -f "$RT" ]; then
     MODS="java.base java.logging java.sql java.naming java.desktop java.management java.xml java.instrument java.compiler jdk.unsupported java.transaction.xa java.net.http java.scripting java.security.jgss java.rmi java.datatransfer java.prefs"
     INC=$(for m in $MODS; do printf "regex:/%s/.*," "$m"; done)
     rm -rf "$K/jdkx" "$K/stubs"
-    "$JAVA_HOME/bin/jimage" extract --include "${INC%,}" --dir "$(cygpath -w "$K/jdkx")" "$(cygpath -w "$JAVA_HOME/lib/modules")"
+    "$JAVA_HOME/bin/jimage" extract --include "${INC%,}" --dir "$(wp "$K/jdkx")" "$(wp "$JAVA_HOME/lib/modules")"
     (cd "$T/jdk-stubs" && "$JAVA_HOME/bin/javac" --release 8 -d "$K/stubs" java/lang/invoke/*.java java/lang/runtime/*.java)
-    python -I "$T/scripts/pack_jre.py" "$K/jdkx" "$RT"
-    python -I - "$RT" "$K/stubs/java/lang/runtime/ObjectMethods.class" <<'EOF'
+    "$PY" -I "$T/scripts/pack_jre.py" "$K/jdkx" "$RT"
+    "$PY" -I - "$RT" "$K/stubs/java/lang/runtime/ObjectMethods.class" <<'EOF'
 import sys, zipfile, os
 rt, stub = sys.argv[1], sys.argv[2]
 tmp = rt + '.tmp'
@@ -53,6 +55,6 @@ if [ ! -d "$W/app" ]; then
     mkdir -p "$W/bootjar"
     cp -r "$CLASSES" "$W/app"
     (cd "$W/bootjar" && unzip -q "$JAR" 'BOOT-INF/lib/*')
-    python -I "$T/scripts/prep_micans.py" "$W"
+    "$PY" -I "$T/scripts/prep_micans.py" "$W"
 fi
 echo "$svc: $W"
