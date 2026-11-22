@@ -14,7 +14,7 @@
    the channel model (HTTP, AMQP, shared tables) into chains from an endpoint to a sink
 4. <out>/vkr-taint-report.json and <out>/vkr-taint.sarif (with --baseline: baselineState new/unchanged)
 
-exit: 0, or with --gate (or gate.fail-on: new-chains) 1 on new chains and 2 when a service failed;
+exit: 0, or with --gate (or gate.fail-on: new-chains) 1 on new findings and 2 when a service failed;
       3 on a configuration or build error
 env:  JAVA_HOME (JDK 21+ running Micans), VKR_MICANS_JAR (the patched Micans jar),
       VKR_CHANNEL_EXTRACTOR (channel-extractor jar, default: analysis/channel-extractor/target),
@@ -113,11 +113,11 @@ def main():
     ap.add_argument('--image', default='maven:3.9.9-eclipse-temurin-17', help='Maven image for --build docker')
     ap.add_argument('--mvn-arg', action='append', default=[], help='extra Maven argument (repeatable)')
     ap.add_argument('--services', help='analyse only these services (comma-separated)')
-    ap.add_argument('--baseline', help='earlier vkr-taint-report.json: report new and removed chains')
+    ap.add_argument('--baseline', help='earlier vkr-taint-report.json: report new and removed findings')
     ap.add_argument('--out', default='vkr-taint-out', help='directory for the report and SARIF')
     ap.add_argument('--work', help='work dir with the analysis cache (default: $VKR_WORK or ~/.cache/vkr-taint/...)')
     g = ap.add_mutually_exclusive_group()
-    g.add_argument('--gate', action='store_true', help='exit 1 on new chains, 2 on a failed service')
+    g.add_argument('--gate', action='store_true', help='exit 1 on new findings, 2 on a failed service')
     g.add_argument('--no-gate', action='store_true')
     a = ap.parse_args()
 

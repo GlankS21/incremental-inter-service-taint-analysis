@@ -5,8 +5,10 @@ Each service is re-analysed only when something its Micans run reads has changed
                 from the channel model and the bytecode, or hand-written), discovery, overrides,
                 config generators, launcher, Micans jar, JDK, context sensitivity) -> taint/store flows
   summary key = hash(run key, channel model, summarize.py)                   -> summary.json
-Composition is cheap and always recomputed from the summaries; its chains to a sink are compared
-with a baseline report, and new chains fail the run with --gate (exit 1).
+Composition is cheap and always recomputed from the summaries. Its chains to a sink are grouped
+into findings (finding_key: entry point and sink method, so the source labels and channel paths of
+one flow are one finding) and compared with a baseline report; new findings fail the run with
+--gate (exit 1).
 A service whose analysis fails does not stop the run: the report lists it under "failed", baseline
 chains through it go to "unchecked" (not "removed"), and with --gate the run exits 2.
 
@@ -122,6 +124,24 @@ def chain_key(chain):
     """A chain without line numbers (Class#method:42, publisher and listener ids): code moved by an
     unrelated edit is the same finding, not a new one."""
     return re.sub(r'(#[\w$]+):\d+', r'\1', chain)
+
+
+def finding_key(chain):
+    """The finding a chain belongs to: its entry point without the source label, and the sink method.
+    The same flow is printed once per granularity of the source (<0>, <0/warehouse>,
+    <AddCartItemRequest.warehouse>) and once per path through the channels; these are one finding
+    (experiments/precision.py counts findings the same way, with the sink line)."""
+    entry = re.sub(r' <[^>]*>$', '', chain.split('  ')[0])
+    sink = re.search(r'CWE-\d+ @ [\w$.]+#[\w$<>]+', chain).group(0)
+    return f'{entry} => {sink}'
+
+
+def group_findings(chains):
+    """[{'key', 'chains'}], sorted by key; a finding's chains keep the order of `chains`."""
+    groups = {}
+    for c in chains:
+        groups.setdefault(finding_key(c), []).append(c)
+    return [{'key': k, 'chains': groups[k]} for k in sorted(groups)]
 
 
 def summary_key(rkey, model):
@@ -280,8 +300,10 @@ def main():
                               env=vkr_prepare.tool_env(CFG)).stdout
     chains = sorted({l for l in composed.splitlines() if 'CWE-' in l})
     report['chains'] = chains
+    findings = group_findings(chains)
+    report['findings'] = findings
     report['seconds'] = round(time.time() - start, 1)
-    new = removed = []
+    new = removed = new_findings = removed_findings = []
     if a.baseline:
         old = json.load(open(a.baseline, encoding='utf-8'))['chains']
         old_keys, cur_keys = {chain_key(c) for c in old}, {chain_key(c) for c in chains}
@@ -291,17 +313,24 @@ def main():
         removed = [c for c in gone if not failed_services_in(c, failed)]
         report['new'], report['removed'] = new, removed
         report['unchecked'] = [c for c in gone if failed_services_in(c, failed)]
+        # the gate counts findings: another path or source label of a known finding is not a new one
+        old_findings = {finding_key(c) for c in old}
+        cur_findings = {f['key'] for f in findings}
+        new_findings = [f['key'] for f in findings if f['key'] not in old_findings]
+        removed_findings = sorted({finding_key(c) for c in removed} - cur_findings)
+        report['newFindings'], report['removedFindings'] = new_findings, removed_findings
     with open(a.out, 'w', encoding='utf-8') as f:
         json.dump(report, f, indent=1)
     crossing = sum('-->' in c for c in chains)
-    print(f'{len(chains)} chains to a sink ({crossing} across a channel)'
-          + (f', {len(new)} new, {len(removed)} removed' if a.baseline else '')
+    print(f'{len(findings)} findings, {len(chains)} chains to a sink ({crossing} across a channel)'
+          + (f'; {len(new_findings)} new and {len(removed_findings)} removed findings '
+             f'({len(new)} new, {len(removed)} removed chains)' if a.baseline else '')
           + f'; {report["seconds"]:.0f} s total -> {a.out}')
-    for c in new:
-        print('NEW', c)
+    for k in new_findings:
+        print('NEW', k)
     if failed:
         print(f'{len(failed)} of {len(services)} services FAILED, their chains are missing: {", ".join(failed)}')
-    if gate and new:
+    if gate and new_findings:
         sys.exit(1)
     if gate and failed:
         sys.exit(2)  # an incomplete analysis must not pass the gate

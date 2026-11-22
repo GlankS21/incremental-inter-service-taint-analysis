@@ -2,7 +2,7 @@ name: vkr-taint
 description: >-
   Incremental inter-service taint analysis of a Spring Cloud (Maven) repository: only services whose
   analysis inputs changed are re-analysed with Micans, the per-service summaries are composed along the
-  HTTP, AMQP and shared-table channels, and the chains to a sink are reported as SARIF.
+  HTTP, AMQP and shared-table channels, and the chains to a sink, grouped into findings, are reported as SARIF.
 author: GlankS21
 
 inputs:
@@ -16,7 +16,7 @@ inputs:
     description: Analyse only these services (comma-separated).
     default: ''
   gate:
-    description: Fail on a chain that the baseline does not have, or on a service whose analysis failed.
+    description: Fail on a finding that the baseline does not have, or on a service whose analysis failed.
     default: 'true'
   heap:
     description: Micans heap (the 16 GB GitHub-hosted runner leaves about 12g).
@@ -29,11 +29,14 @@ inputs:
     default: ${{ github.event.repository.default_branch }}
 
 outputs:
+  findings:
+    description: Number of findings (chains of one entry point and sink method).
+    value: ${{ steps.run.outputs.findings }}
   chains:
     description: Number of chains to a sink.
     value: ${{ steps.run.outputs.chains }}
   new:
-    description: Number of chains that the baseline does not have.
+    description: Number of findings that the baseline does not have.
     value: ${{ steps.run.outputs.new }}
   sarif:
     description: Path of the SARIF file.
@@ -85,7 +88,7 @@ runs:
           args+=(--baseline /baseline/report.json)
           [ "$INPUT_GATE" = true ] && args+=(--gate)
         else
-          echo "::notice::no baseline report yet: chains are listed but not compared"
+          echo "::notice::no baseline report yet: findings are listed but not compared"
           args+=(--no-gate)
         fi
         code=0
@@ -102,8 +105,9 @@ runs:
           python3 - "$out/vkr-taint-report.json" >> "$GITHUB_OUTPUT" <<'EOF'
         import json, sys
         r = json.load(open(sys.argv[1], encoding='utf-8'))
+        print(f"findings={len(r.get('findings', r['chains']))}")
         print(f"chains={len(r['chains'])}")
-        print(f"new={len(r.get('new', []))}")
+        print(f"new={len(r.get('newFindings', r.get('new', [])))}")
         EOF
           python3 "$GITHUB_ACTION_PATH/analysis/taint/scripts/report_md.py" "$out/vkr-taint-report.json" \
             --sarif "$out/vkr-taint.sarif" --blob "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$HEAD_SHA" \
@@ -145,7 +149,7 @@ runs:
       shell: bash
       run: |
         case "${{ steps.run.outputs.code }}" in
-          1) echo "::error::vkr-taint: ${{ steps.run.outputs.new }} new chain(s) to a sink, see the job summary and code scanning";;
+          1) echo "::error::vkr-taint: ${{ steps.run.outputs.new }} new finding(s), see the job summary and code scanning";;
           2) echo "::error::vkr-taint: a service could not be analysed, its chains are missing";;
           *) echo "::error::vkr-taint failed (exit ${{ steps.run.outputs.code }})";;
         esac
