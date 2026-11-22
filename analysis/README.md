@@ -151,6 +151,17 @@ Sink catalogues:
 - **`cwe-89`**: JPA `EntityManager.createQuery`/`createNativeQuery` (javax and jakarta),
   `JdbcTemplate` `query*`/`update`/`execute`, and MyBatis mapper parameters used with `${}`.
 - **`cwe-117`**: the arguments of SLF4J `Logger` calls. Log4j and JUL are not in the catalogue.
+- **`cwe-79`**: the text body of a request handler: the `String` a `@ResponseBody`/`@RestController`
+  method returns, or the `String` passed to `ResponseEntity.ok`/`body`. It is checked by the plugin
+  `vkr.plugin.ResponseBodySink`, because Spring writes the body outside the analysed code. Object
+  bodies are serialised as JSON and are not sinks. Spring `HtmlUtils.htmlEscape`, commons-text and
+  lang3 `escapeHtml4`, and OWASP `Encode.forHtml` are sanitizers.
+- **`cwe-918`**: `URL.openConnection`/`openStream` and `HttpRequest.newBuilder(URI)`/`Builder.uri`.
+  `URI.create` and `new URL(..)` carry taint to the URL.
+- **`cwe-1336`**: a template compiled from a string: the FreeMarker `Template` constructors,
+  Thymeleaf `TemplateEngine.process` and Velocity `evaluate`.
+
+The default is `[cwe-89, cwe-117]`. List the other catalogues in `taint.sinks` to enable them.
 
 Examples: [`taint/config/ecommerce.vkr-taint.yml`](taint/config/ecommerce.vkr-taint.yml) (the
 testbed); [`experiments/public/*.vkr-taint.yml`](experiments/public) (train-ticket, mall-swarm).

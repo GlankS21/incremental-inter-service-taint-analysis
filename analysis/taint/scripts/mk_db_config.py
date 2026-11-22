@@ -109,7 +109,10 @@ BIGDECIMAL_TRANSFERS = [
 
 src, entities, out = sys.argv[1:4]
 s = open(src, encoding='utf-8').read()
-assert '\nsinks:\n' in s and '\ntransfers:\n' in s and 'sanitizers:' not in s
+assert '\nsinks:\n' in s and '\ntransfers:\n' in s
+# the generated config has a sanitizers: section of its own when a catalogue brings encoders (cwe-79)
+if '\nsanitizers:\n' not in s:
+    s += '\nsanitizers:\n'
 s = s.replace('\nsinks:\n', '\n' + open(entities, encoding='utf-8').read() + '\nsinks:\n', 1)
 s = s.replace('\ntransfers:\n', '\ntransfers:\n  # static String helpers, summarised at the call site\n'
               + ''.join(f'  - {{ method: "{h}", from: 0, to: result }}\n' for h in HELPERS)
@@ -120,6 +123,8 @@ s = s.replace('\ntransfers:\n', '\ntransfers:\n  # static String helpers, summar
                         for m, i in UTIL_TRANSFERS if f'"{m}", from: {i}' not in s)
               + ''.join(f'  - {{ method: "{m}", from: {i}, to: result }}\n'
                         for m, i in BIGDECIMAL_TRANSFERS if f'"{m}", from: {i}' not in s), 1)
-s += ('\nsanitizers:\n' + ''.join(f'  - {{ kind: param, method: "{h}", index: 0 }}\n' for h in HELPERS)
-      + ''.join(f'  - {{ kind: param, method: "{m}", index: {i} }}\n' for m, i in JDK_STRING + PIPELINE_SANITIZERS + CONTAINER_SANITIZERS))
+s = s.replace('\nsanitizers:\n', '\nsanitizers:\n'
+              + ''.join(f'  - {{ kind: param, method: "{h}", index: 0 }}\n' for h in HELPERS)
+              + ''.join(f'  - {{ kind: param, method: "{m}", index: {i} }}\n'
+                        for m, i in JDK_STRING + PIPELINE_SANITIZERS + CONTAINER_SANITIZERS), 1)
 open(out, 'w', encoding='utf-8').write(s)
