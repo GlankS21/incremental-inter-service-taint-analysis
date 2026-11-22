@@ -29,6 +29,8 @@ public interface InventoryService {
      */
     List<StockAvailabilityResponse> getAvailability(Collection<Long> productIds);
 
+    List<StockAvailabilityResponse> getAvailabilityIn(Collection<Long> productIds, String warehouse);
+
     /**
      * Adds or removes units. Creates the stock record when it does not exist yet (the
      * {@code product.created} event may not have been processed).

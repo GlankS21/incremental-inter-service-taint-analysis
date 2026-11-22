@@ -13,6 +13,9 @@ public record AddCartItemRequest(
 
         @Schema(description = "Сколько штук добавить к количеству, уже лежащему в корзине", example = "1")
         @NotNull @Min(1)
-        Integer quantity
+        Integer quantity,
+
+        @Schema(description = "Склад, с которого желательно отгрузить товар", example = "MSK-1")
+        String warehouse
 ) {
 }

@@ -2,6 +2,7 @@ package com.shop.cart.service.impl;
 
 import com.shop.cart.client.ProductCatalog;
 import com.shop.cart.client.ProductSummary;
+import com.shop.cart.client.WarehouseClient;
 import com.shop.cart.config.CartProperties;
 import com.shop.cart.dto.request.AddCartItemRequest;
 import com.shop.cart.dto.response.CartItemResponse;
@@ -51,6 +52,7 @@ public class CartServiceImpl implements CartService {
 
     private final CartRepository cartRepository;
     private final ProductCatalog productCatalog;
+    private final WarehouseClient warehouseClient;
     private final CartProperties properties;
     private final TransactionTemplate transactionTemplate;
 
@@ -66,6 +68,9 @@ public class CartServiceImpl implements CartService {
     public CartResponse addItem(UUID userId, AddCartItemRequest request) {
         ProductSummary product = requireSellable(request.productId());
         Optional<Integer> available = availabilityOf(product.id());
+        if (request.warehouse() != null) {
+            warehouseClient.availabilityIn(List.of(product.id()), request.warehouse());
+        }
         transactionTemplate.executeWithoutResult(status -> {
             Cart cart = lockOrCreateCart(userId);
             CartItem item = cart.findItem(product.id()).orElse(null);

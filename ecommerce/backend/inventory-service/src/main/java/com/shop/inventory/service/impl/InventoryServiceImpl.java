@@ -24,6 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.MessageSource;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,6 +47,7 @@ public class InventoryServiceImpl implements InventoryService {
     private final InventoryProperties properties;
     private final MessageSource messageSource;
     private final StockLevelNotifier stockLevelNotifier;
+    private final JdbcTemplate jdbcTemplate;
 
     @Override
     @Transactional(readOnly = true)
@@ -62,6 +64,13 @@ public class InventoryServiceImpl implements InventoryService {
         return inventoryItemRepository.findById(productId)
                 .map(inventoryMapper::toResponse)
                 .orElseThrow(() -> ResourceNotFoundException.of("inventory.error.item-not-found", productId));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<StockAvailabilityResponse> getAvailabilityIn(Collection<Long> productIds, String warehouse) {
+        jdbcTemplate.queryForList("select product_id from warehouse_stock where warehouse = '" + warehouse + "'");
+        return getAvailability(productIds);
     }
 
     @Override

@@ -28,4 +28,12 @@ public class StockAvailabilityController {
             @RequestParam(name = "productIds") List<Long> productIds) {
         return ApiResponse.success(inventoryService.getAvailability(productIds));
     }
+
+    @Operation(summary = "Доступное количество товаров на складе")
+    @GetMapping("/by-warehouse")
+    public ApiResponse<List<StockAvailabilityResponse>> availabilityIn(
+            @RequestParam(name = "productIds") List<Long> productIds,
+            @RequestParam(name = "warehouse") String warehouse) {
+        return ApiResponse.success(inventoryService.getAvailabilityIn(productIds, warehouse));
+    }
 }
