@@ -116,16 +116,15 @@ runs:
         path: ${{ runner.temp }}/vkr-cache
         key: vkr-taint-cache-${{ github.run_id }}-${{ github.run_attempt }}
 
+    # saved from the path that pull requests restore it to: a cache is found only under the same path
     - name: Store the baseline
       if: github.event_name == 'push' && github.ref_name == inputs.baseline-branch && steps.run.outputs.code == '0'
       shell: bash
-      run: |
-        mkdir -p "$RUNNER_TEMP/vkr-baseline-new"
-        cp "$RUNNER_TEMP/vkr-out/vkr-taint-report.json" "$RUNNER_TEMP/vkr-baseline-new/report.json"
+      run: cp "$RUNNER_TEMP/vkr-out/vkr-taint-report.json" "$RUNNER_TEMP/vkr-baseline/report.json"
     - uses: actions/cache/save@v4
       if: github.event_name == 'push' && github.ref_name == inputs.baseline-branch && steps.run.outputs.code == '0'
       with:
-        path: ${{ runner.temp }}/vkr-baseline-new
+        path: ${{ runner.temp }}/vkr-baseline
         key: vkr-taint-baseline-${{ github.sha }}
 
     - uses: github/codeql-action/upload-sarif@v3
