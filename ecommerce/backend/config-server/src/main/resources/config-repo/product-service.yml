@@ -19,3 +19,28 @@ app:
     # Uploaded product images (a named Docker volume in docker-compose), created at startup if missing
     image-storage-dir: ${PRODUCT_IMAGE_DIR:./data/product-images}
     image-max-size: ${PRODUCT_IMAGE_MAX_SIZE:5MB}
+  # Catalogue search (PostgreSQL full text + pg_trgm), see product-service/README.md
+  search:
+    # Fewer full-text results than this add typo-tolerant (trigram) matches
+    fallback-below-results: 3
+    # pg_trgm word similarity of a query word with a product name or brand (typo tolerance)
+    word-similarity-threshold: 0.45
+    # pg_trgm similarity of a misspelt word with the catalogue word replacing it ("Возможно, вы имели в виду")
+    spelling-similarity-threshold: 0.4
+    suggest-cache-ttl: 60s
+    suggest-cache-size: 10000
+    popular-cache-ttl: 5m
+    # Window of the search log for popular queries and completions
+    popular-period: 30d
+    history-retention: ${SEARCH_HISTORY_RETENTION:180d}
+    history-cleanup-cron: "0 30 3 * * *"
+    # Delay between checks whether the word dictionary must be rebuilt after catalogue changes
+    dictionary-refresh-delay: 30s
+  # Review reminder e-mail, see product-service/README.md
+  reviews:
+    reminder:
+      enabled: ${REVIEW_REMINDER_ENABLED:true}
+      # Days after delivery before customers who have not reviewed every product get one reminder
+      delay-days: ${REVIEW_REMINDER_DELAY_DAYS:3}
+      check-interval: 15m
+      batch-size: 100

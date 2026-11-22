@@ -50,6 +50,14 @@ class OrderTest {
     }
 
     @Test
+    void truncatedReasonNeverEndsWithHalfAnEmoji() {
+        String emoji = new String(Character.toChars(0x1F600));
+        String reason = "a".repeat(Order.MAX_REASON_LENGTH - 1) + emoji + " и ещё текст";
+
+        assertThat(Order.truncate(reason)).isEqualTo("a".repeat(Order.MAX_REASON_LENGTH - 1));
+    }
+
+    @Test
     void rejectsSkippedOrBackwardTransitions() {
         Order order = placedOrder();
 
@@ -58,7 +66,7 @@ class OrderTest {
                 .hasMessage("order.error.invalid-transition")
                 .satisfies(ex -> assertThat(messageSource.getMessage(ex.getMessage(),
                         ((BusinessException) ex).getMessageArgs(), CommonMessagesAutoConfiguration.DEFAULT_LOCALE))
-                        .isEqualTo("Заказ ORD-1 нельзя перевести из статуса «Ожидает подтверждения» в статус «Оплачен»"));
+                        .isEqualTo("Заказ ORD-1 нельзя перевести из статуса «Ожидает подтверждения» в статус «Подтверждён»"));
         order.changeStatus(OrderStatus.CANCELLED, "Недостаточно товара на складе", null, NOW);
         assertThatThrownBy(() -> order.changeStatus(OrderStatus.AWAITING_PAYMENT, null, null, NOW))
                 .isInstanceOf(BusinessException.class);

@@ -54,6 +54,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.function.BooleanSupplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -139,7 +140,7 @@ class OrderSagaIntegrationTest {
         assertThat(order.at("/data/shippingFee").decimalValue()).isEqualByComparingTo("0");
 
         OrderCreatedEvent createdEvent = receive(created, new ParameterizedTypeReference<>() {
-        });
+        }, OrderCreatedEvent::orderId, orderId);
         assertThat(createdEvent).isNotNull();
         assertThat(createdEvent.orderId()).isEqualTo(orderId);
         assertThat(createdEvent.userId()).isEqualTo(customerId);
@@ -148,7 +149,7 @@ class OrderSagaIntegrationTest {
         rabbitTemplate.convertAndSend(MessagingConstants.INVENTORY_EXCHANGE, MessagingConstants.STOCK_RESERVED_KEY,
                 new StockReservedEvent(UUID.randomUUID(), Instant.now(), orderId, createdEvent.orderNumber()));
         PaymentRequestedEvent paymentRequest = receive(paymentRequested, new ParameterizedTypeReference<>() {
-        });
+        }, PaymentRequestedEvent::orderId, orderId);
         assertThat(paymentRequest).isNotNull();
         assertThat(paymentRequest.amount()).isEqualByComparingTo("25140000");
         assertThat(paymentRequest.paymentMethod()).isEqualTo("ONLINE");
@@ -158,7 +159,7 @@ class OrderSagaIntegrationTest {
                 new PaymentSucceededEvent(UUID.randomUUID(), Instant.now(), UUID.randomUUID(), orderId,
                         createdEvent.orderNumber(), "TXN-123", paymentRequest.amount(), "RUB"));
         OrderConfirmedEvent confirmedEvent = receive(confirmed, new ParameterizedTypeReference<>() {
-        });
+        }, OrderConfirmedEvent::orderId, orderId);
         assertThat(confirmedEvent).isNotNull();
         assertThat(confirmedEvent.orderId()).isEqualTo(orderId);
 
@@ -201,7 +202,7 @@ class OrderSagaIntegrationTest {
                         new BigDecimal("25140000"), "RUB", "Превышен лимит по карте"));
 
         OrderCancelledEvent cancelledEvent = receive(cancelled, new ParameterizedTypeReference<>() {
-        });
+        }, OrderCancelledEvent::orderId, orderId);
         assertThat(cancelledEvent).isNotNull();
         assertThat(cancelledEvent.orderId()).isEqualTo(orderId);
         assertThat(cancelledEvent.reason()).isEqualTo("Оплата не прошла: Превышен лимит по карте");
@@ -310,7 +311,7 @@ class OrderSagaIntegrationTest {
         assertThat(order.at("/data/discountAmount").decimalValue()).isEqualByComparingTo("1000000");
         assertThat(order.at("/data/totalAmount").decimalValue()).isEqualByComparingTo("24140000");
         OrderCreatedEvent createdEvent = receive(created, new ParameterizedTypeReference<>() {
-        });
+        }, OrderCreatedEvent::orderId, orderId);
         assertThat(createdEvent).isNotNull();
         assertThat(createdEvent.totalAmount()).isEqualByComparingTo("24140000");
         mockMvc.perform(get("/api/orders").header(HttpHeaders.AUTHORIZATION, customerToken()))
@@ -470,7 +471,7 @@ class OrderSagaIntegrationTest {
                     .andExpect(jsonPath("$.data.status").value(status));
         }
         OrderDeliveredEvent deliveredEvent = receive(delivered, new ParameterizedTypeReference<>() {
-        });
+        }, OrderDeliveredEvent::orderId, shipped);
         assertThat(deliveredEvent).isNotNull();
         assertThat(deliveredEvent.orderId()).isEqualTo(shipped);
         assertThat(deliveredEvent.userId()).isEqualTo(customerId);
@@ -629,8 +630,21 @@ class OrderSagaIntegrationTest {
         return queue.getName();
     }
 
-    private <T> T receive(String queue, ParameterizedTypeReference<T> type) {
-        return rabbitTemplate.receiveAndConvert(queue, RECEIVE_TIMEOUT_MS, type);
+    /**
+     * First event of the order on the probe queue; events of other orders (e.g. published late by the outbox
+     * relay for an earlier test) are skipped.
+     */
+    private <T> T receive(String queue, ParameterizedTypeReference<T> type, Function<T, UUID> orderIdOf,
+                          UUID orderId) {
+        long deadline = System.currentTimeMillis() + RECEIVE_TIMEOUT_MS;
+        long remaining;
+        while ((remaining = deadline - System.currentTimeMillis()) > 0) {
+            T event = rabbitTemplate.receiveAndConvert(queue, remaining, type);
+            if (event == null || orderId.equals(orderIdOf.apply(event))) {
+                return event;
+            }
+        }
+        return null;
     }
 
     private void waitUntil(BooleanSupplier condition) throws InterruptedException {

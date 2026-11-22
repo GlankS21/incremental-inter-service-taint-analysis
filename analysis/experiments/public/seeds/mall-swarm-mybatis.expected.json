@@ -1,0 +1,16 @@
+{
+  "repo": "mall-swarm",
+  "base_commit": "04c442fe318356bae4445a109dde7af297ce1e84",
+  "patch": "mall-swarm-mybatis.patch",
+  "seeds": [
+    {"id": "S1", "expect": "detected", "cwe": "CWE-89", "service": "mall-admin",
+     "entry": "GET /brand/list", "param": "sort",
+     "sink": "PmsBrandServiceImpl#listBrand -> PmsBrandMapper.selectByExample (${orderByClause}, sink index 0.orderByClause)"},
+    {"id": "S2", "expect": "detected", "cwe": "CWE-89", "service": "mall-admin",
+     "entry": "GET /order/list", "param": "sort",
+     "sink": "OmsOrderServiceImpl#list:38 -> OmsOrderDao.getList (ORDER BY ${sort}, @Param(\"sort\"), sink index 1)"},
+    {"id": "N1", "expect": "not-detected", "cwe": "CWE-89", "service": "mall-admin",
+     "entry": "GET /returnReason/list", "param": "dir",
+     "sink": "OmsOrderReturnReasonServiceImpl#list:45 -> setOrderByClause gets one of two constants"}
+  ]
+}

@@ -1,0 +1,164 @@
+diff --git a/mall-admin/src/main/java/com/macro/mall/controller/OmsOrderController.java b/mall-admin/src/main/java/com/macro/mall/controller/OmsOrderController.java
+index b2cb42a..09d7eda 100644
+--- a/mall-admin/src/main/java/com/macro/mall/controller/OmsOrderController.java
++++ b/mall-admin/src/main/java/com/macro/mall/controller/OmsOrderController.java
+@@ -30,8 +30,9 @@ public class OmsOrderController {
+     @ResponseBody
+     public CommonResult<CommonPage<OmsOrder>> list(OmsOrderQueryParam queryParam,
+                                                    @RequestParam(value = "pageSize", defaultValue = "5") Integer pageSize,
+-                                                   @RequestParam(value = "pageNum", defaultValue = "1") Integer pageNum) {
+-        List<OmsOrder> orderList = orderService.list(queryParam, pageSize, pageNum);
++                                                   @RequestParam(value = "pageNum", defaultValue = "1") Integer pageNum,
++                                                   @RequestParam(value = "sort", required = false) String sort) {
++        List<OmsOrder> orderList = orderService.list(queryParam, sort, pageSize, pageNum);
+         return CommonResult.success(CommonPage.restPage(orderList));
+     }
+ 
+diff --git a/mall-admin/src/main/java/com/macro/mall/controller/OmsOrderReturnReasonController.java b/mall-admin/src/main/java/com/macro/mall/controller/OmsOrderReturnReasonController.java
+index 119387f..15b69d7 100644
+--- a/mall-admin/src/main/java/com/macro/mall/controller/OmsOrderReturnReasonController.java
++++ b/mall-admin/src/main/java/com/macro/mall/controller/OmsOrderReturnReasonController.java
+@@ -61,8 +61,9 @@ public class OmsOrderReturnReasonController {
+     @RequestMapping(value = "/list", method = RequestMethod.GET)
+     @ResponseBody
+     public CommonResult<CommonPage<OmsOrderReturnReason>> list(@RequestParam(value = "pageSize", defaultValue = "5") Integer pageSize,
+-                                                               @RequestParam(value = "pageNum", defaultValue = "1") Integer pageNum) {
+-        List<OmsOrderReturnReason> reasonList = orderReturnReasonService.list(pageSize, pageNum);
++                                                               @RequestParam(value = "pageNum", defaultValue = "1") Integer pageNum,
++                                                               @RequestParam(value = "dir", required = false) String dir) {
++        List<OmsOrderReturnReason> reasonList = orderReturnReasonService.list(dir, pageSize, pageNum);
+         return CommonResult.success(CommonPage.restPage(reasonList));
+     }
+ 
+diff --git a/mall-admin/src/main/java/com/macro/mall/controller/PmsBrandController.java b/mall-admin/src/main/java/com/macro/mall/controller/PmsBrandController.java
+index c9e60cf..bc95958 100644
+--- a/mall-admin/src/main/java/com/macro/mall/controller/PmsBrandController.java
++++ b/mall-admin/src/main/java/com/macro/mall/controller/PmsBrandController.java
+@@ -79,8 +79,9 @@ public class PmsBrandController {
+     @ResponseBody
+     public CommonResult<CommonPage<PmsBrand>> getList(@RequestParam(value = "keyword", required = false) String keyword,
+                                                       @RequestParam(value = "pageNum", defaultValue = "1") Integer pageNum,
+-                                                      @RequestParam(value = "pageSize", defaultValue = "5") Integer pageSize) {
+-        List<PmsBrand> brandList = brandService.listBrand(keyword, pageNum, pageSize);
++                                                      @RequestParam(value = "pageSize", defaultValue = "5") Integer pageSize,
++                                                      @RequestParam(value = "sort", defaultValue = "sort desc") String sort) {
++        List<PmsBrand> brandList = brandService.listBrand(keyword, sort, pageNum, pageSize);
+         return CommonResult.success(CommonPage.restPage(brandList));
+     }
+ 
+diff --git a/mall-admin/src/main/java/com/macro/mall/dao/OmsOrderDao.java b/mall-admin/src/main/java/com/macro/mall/dao/OmsOrderDao.java
+index 0bd91f6..4dcfbaa 100644
+--- a/mall-admin/src/main/java/com/macro/mall/dao/OmsOrderDao.java
++++ b/mall-admin/src/main/java/com/macro/mall/dao/OmsOrderDao.java
+@@ -16,7 +16,7 @@ public interface OmsOrderDao {
+     /**
+      * 条件查询订单
+      */
+-    List<OmsOrder> getList(@Param("queryParam") OmsOrderQueryParam queryParam);
++    List<OmsOrder> getList(@Param("queryParam") OmsOrderQueryParam queryParam, @Param("sort") String sort);
+ 
+     /**
+      * 批量发货
+diff --git a/mall-admin/src/main/java/com/macro/mall/service/OmsOrderReturnReasonService.java b/mall-admin/src/main/java/com/macro/mall/service/OmsOrderReturnReasonService.java
+index f46844c..e616e0d 100644
+--- a/mall-admin/src/main/java/com/macro/mall/service/OmsOrderReturnReasonService.java
++++ b/mall-admin/src/main/java/com/macro/mall/service/OmsOrderReturnReasonService.java
+@@ -27,7 +27,7 @@ public interface OmsOrderReturnReasonService {
+     /**
+      * 分页获取退货原因
+      */
+-    List<OmsOrderReturnReason> list(Integer pageSize, Integer pageNum);
++    List<OmsOrderReturnReason> list(String dir, Integer pageSize, Integer pageNum);
+ 
+     /**
+      * 批量修改退货原因状态
+diff --git a/mall-admin/src/main/java/com/macro/mall/service/OmsOrderService.java b/mall-admin/src/main/java/com/macro/mall/service/OmsOrderService.java
+index 86abe71..a39618f 100644
+--- a/mall-admin/src/main/java/com/macro/mall/service/OmsOrderService.java
++++ b/mall-admin/src/main/java/com/macro/mall/service/OmsOrderService.java
+@@ -14,7 +14,7 @@ public interface OmsOrderService {
+     /**
+      * 订单查询
+      */
+-    List<OmsOrder> list(OmsOrderQueryParam queryParam, Integer pageSize, Integer pageNum);
++    List<OmsOrder> list(OmsOrderQueryParam queryParam, String sort, Integer pageSize, Integer pageNum);
+ 
+     /**
+      * 批量发货
+diff --git a/mall-admin/src/main/java/com/macro/mall/service/PmsBrandService.java b/mall-admin/src/main/java/com/macro/mall/service/PmsBrandService.java
+index 8b1e11b..30b1fd6 100644
+--- a/mall-admin/src/main/java/com/macro/mall/service/PmsBrandService.java
++++ b/mall-admin/src/main/java/com/macro/mall/service/PmsBrandService.java
+@@ -40,7 +40,7 @@ public interface PmsBrandService {
+     /**
+      * 分页查询品牌
+      */
+-    List<PmsBrand> listBrand(String keyword, int pageNum, int pageSize);
++    List<PmsBrand> listBrand(String keyword, String sort, int pageNum, int pageSize);
+ 
+     /**
+      * 获取品牌
+diff --git a/mall-admin/src/main/java/com/macro/mall/service/impl/OmsOrderReturnReasonServiceImpl.java b/mall-admin/src/main/java/com/macro/mall/service/impl/OmsOrderReturnReasonServiceImpl.java
+index 69718d7..0cec2fe 100644
+--- a/mall-admin/src/main/java/com/macro/mall/service/impl/OmsOrderReturnReasonServiceImpl.java
++++ b/mall-admin/src/main/java/com/macro/mall/service/impl/OmsOrderReturnReasonServiceImpl.java
+@@ -39,10 +39,10 @@ public class OmsOrderReturnReasonServiceImpl implements OmsOrderReturnReasonServ
+     }
+ 
+     @Override
+-    public List<OmsOrderReturnReason> list(Integer pageSize, Integer pageNum) {
++    public List<OmsOrderReturnReason> list(String dir, Integer pageSize, Integer pageNum) {
+         PageHelper.startPage(pageNum,pageSize);
+         OmsOrderReturnReasonExample example = new OmsOrderReturnReasonExample();
+-        example.setOrderByClause("sort desc");
++        example.setOrderByClause("asc".equals(dir) ? "sort asc" : "sort desc");
+         return returnReasonMapper.selectByExample(example);
+     }
+ 
+diff --git a/mall-admin/src/main/java/com/macro/mall/service/impl/OmsOrderServiceImpl.java b/mall-admin/src/main/java/com/macro/mall/service/impl/OmsOrderServiceImpl.java
+index d552526..58d218a 100644
+--- a/mall-admin/src/main/java/com/macro/mall/service/impl/OmsOrderServiceImpl.java
++++ b/mall-admin/src/main/java/com/macro/mall/service/impl/OmsOrderServiceImpl.java
+@@ -33,9 +33,9 @@ public class OmsOrderServiceImpl implements OmsOrderService {
+     private OmsOrderOperateHistoryMapper orderOperateHistoryMapper;
+ 
+     @Override
+-    public List<OmsOrder> list(OmsOrderQueryParam queryParam, Integer pageSize, Integer pageNum) {
++    public List<OmsOrder> list(OmsOrderQueryParam queryParam, String sort, Integer pageSize, Integer pageNum) {
+         PageHelper.startPage(pageNum, pageSize);
+-        return orderDao.getList(queryParam);
++        return orderDao.getList(queryParam, sort);
+     }
+ 
+     @Override
+diff --git a/mall-admin/src/main/java/com/macro/mall/service/impl/PmsBrandServiceImpl.java b/mall-admin/src/main/java/com/macro/mall/service/impl/PmsBrandServiceImpl.java
+index 4245a45..a0c0ec9 100644
+--- a/mall-admin/src/main/java/com/macro/mall/service/impl/PmsBrandServiceImpl.java
++++ b/mall-admin/src/main/java/com/macro/mall/service/impl/PmsBrandServiceImpl.java
+@@ -74,10 +74,10 @@ public class PmsBrandServiceImpl implements PmsBrandService {
+     }
+ 
+     @Override
+-    public List<PmsBrand> listBrand(String keyword, int pageNum, int pageSize) {
++    public List<PmsBrand> listBrand(String keyword, String sort, int pageNum, int pageSize) {
+         PageHelper.startPage(pageNum, pageSize);
+         PmsBrandExample pmsBrandExample = new PmsBrandExample();
+-        pmsBrandExample.setOrderByClause("sort desc");
++        pmsBrandExample.setOrderByClause(sort);
+         PmsBrandExample.Criteria criteria = pmsBrandExample.createCriteria();
+         if (!StringUtils.isEmpty(keyword)) {
+             criteria.andNameLike("%" + keyword + "%");
+diff --git a/mall-admin/src/main/resources/dao/OmsOrderDao.xml b/mall-admin/src/main/resources/dao/OmsOrderDao.xml
+index 89f4d2a..cb18b4f 100644
+--- a/mall-admin/src/main/resources/dao/OmsOrderDao.xml
++++ b/mall-admin/src/main/resources/dao/OmsOrderDao.xml
+@@ -32,6 +32,9 @@
+             OR receiver_phone LIKE concat("%",#{queryParam.receiverKeyword},"%")
+             )
+         </if>
++        <if test="sort!=null">
++            ORDER BY ${sort}
++        </if>
+     </select>
+     <update id="delivery">
+         UPDATE oms_order

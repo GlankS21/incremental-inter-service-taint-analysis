@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Pagination, pageIndex } from "@/components/Pagination";
 import { Badge, PageTitle } from "@/components/ui";
 import { formatDateTime } from "@/lib/format";
-import { apiGet, query } from "@/lib/server/data";
+import { apiGet, keepPageInRange, query } from "@/lib/server/data";
 import { param, type SearchParams } from "@/lib/search-params";
 import type { InventoryItem, PageResponse, ProductSummary } from "@/lib/types";
 
@@ -22,6 +22,7 @@ export default async function AdminInventoryPage({ searchParams }: { searchParam
     }),
     getTranslations("adminInventory"),
   ]);
+  keepPageInRange(page, items, "/admin/inventory", { lowStock: lowStock ? "true" : undefined });
   // Names come from product-service; the stock list still renders without them
   const ids = items.content.map((item) => item.productId);
   const names = new Map<number, string>(

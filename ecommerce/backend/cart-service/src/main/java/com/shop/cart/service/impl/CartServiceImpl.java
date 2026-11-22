@@ -26,10 +26,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -67,7 +67,7 @@ public class CartServiceImpl implements CartService {
         ProductSummary product = requireSellable(request.productId());
         Optional<Integer> available = availabilityOf(product.id());
         transactionTemplate.executeWithoutResult(status -> {
-            Cart cart = cartRepository.findByUserIdForUpdate(userId).orElseGet(() -> newCart(userId));
+            Cart cart = lockOrCreateCart(userId);
             CartItem item = cart.findItem(product.id()).orElse(null);
             if (item == null) {
                 if (cart.getItems().size() >= properties.maxItems()) {
@@ -78,7 +78,8 @@ public class CartServiceImpl implements CartService {
                 item.setProductId(product.id());
                 cart.addItem(item);
             }
-            int quantity = item.getQuantity() + request.quantity();
+            // Saturating sum: an int overflow would wrap around to a negative quantity and pass the limit
+            int quantity = (int) Math.min((long) item.getQuantity() + request.quantity(), Integer.MAX_VALUE);
             checkQuantity(product, quantity, available);
             item.setQuantity(quantity);
             copySnapshot(product, item);
@@ -123,17 +124,37 @@ public class CartServiceImpl implements CartService {
         cartRepository.findByUserIdForUpdate(userId).ifPresent(cart -> cart.getItems().clear());
     }
 
+    /**
+     * Subtracts the ordered quantities: units the customer kept in the cart beyond the order stay there.
+     * A redelivered event is recognised by its id and changes nothing.
+     */
     @Override
     @Transactional
     public void removeOrderedProducts(OrderCreatedEvent event) {
-        Set<Long> ordered = event.items().stream()
-                .map(OrderItemPayload::productId)
-                .collect(Collectors.toSet());
+        if (cartRepository.markEventProcessed(event.eventId()) == 0) {
+            log.info("Order {}: event {} already applied to the cart", event.orderNumber(), event.eventId());
+            return;
+        }
+        Map<Long, Integer> ordered = event.items().stream()
+                .collect(Collectors.toMap(OrderItemPayload::productId, OrderItemPayload::quantity, Integer::sum));
         cartRepository.findByUserIdForUpdate(event.userId()).ifPresentOrElse(
                 cart -> {
-                    boolean changed = cart.getItems().removeIf(item -> ordered.contains(item.getProductId()));
-                    log.info("Order {}: {} ordered product(s) {} the cart of {}", event.orderNumber(),
-                            ordered.size(), changed ? "removed from" : "already absent from", event.userId());
+                    int changed = 0;
+                    for (Iterator<CartItem> lines = cart.getItems().iterator(); lines.hasNext(); ) {
+                        CartItem item = lines.next();
+                        Integer quantity = ordered.get(item.getProductId());
+                        if (quantity == null) {
+                            continue;
+                        }
+                        changed++;
+                        if (item.getQuantity() > quantity) {
+                            item.setQuantity(item.getQuantity() - quantity);
+                        } else {
+                            lines.remove();
+                        }
+                    }
+                    log.info("Order {}: {} of {} ordered product(s) taken out of the cart of {}",
+                            event.orderNumber(), changed, ordered.size(), event.userId());
                 },
                 () -> log.debug("Order {}: customer {} has no cart", event.orderNumber(), event.userId()));
     }
@@ -242,10 +263,14 @@ public class CartServiceImpl implements CartService {
         item.setCurrency(product.currency());
     }
 
-    private Cart newCart(UUID userId) {
-        Cart cart = new Cart();
-        cart.setUserId(userId);
-        return cart;
+    /**
+     * The locked cart of the customer, created first when they have none yet.
+     */
+    private Cart lockOrCreateCart(UUID userId) {
+        return cartRepository.findByUserIdForUpdate(userId).orElseGet(() -> {
+            cartRepository.insertIfAbsent(UUID.randomUUID(), userId);
+            return cartRepository.findByUserIdForUpdate(userId).orElseThrow();
+        });
     }
 
     private static ResourceNotFoundException notInCart(Long productId) {

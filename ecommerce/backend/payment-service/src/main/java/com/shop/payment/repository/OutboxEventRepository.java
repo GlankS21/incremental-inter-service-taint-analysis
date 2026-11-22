@@ -14,11 +14,11 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, UUID> 
 
     /**
      * Oldest pending events, locked for the current transaction. {@code SKIP LOCKED} lets several
-     * instances relay in parallel without publishing the same row twice.
+     * instances relay in parallel without publishing the same row twice. Parked rows are skipped.
      */
     @Query(value = """
             select * from outbox_events
-            where published_at is null
+            where published_at is null and failed_at is null
             order by created_at
             limit :limit
             for update skip locked

@@ -13,6 +13,7 @@ import org.springframework.context.annotation.Configuration;
 /**
  * inventory-service publishes saga replies on the inventory exchange and consumes order events
  * (reserve / commit / release) and {@code product.created}. Every queue has its dead-letter queue.
+ * It also declares the {@code stock.level-changed} queue of product-service, so that no level is lost.
  */
 @Configuration
 public class RabbitMQConfig {
@@ -59,6 +60,16 @@ public class RabbitMQConfig {
     public Declarables productCreatedQueue() {
         return consumerQueue(MessagingConstants.INVENTORY_PRODUCT_CREATED_QUEUE,
                 productExchange(), MessagingConstants.PRODUCT_CREATED_KEY);
+    }
+
+    /**
+     * Queue of product-service, declared here as well (identically): publishing is not mandatory, so a
+     * stock level relayed before product-service first started would be dropped as unroutable.
+     */
+    @Bean
+    public Declarables productStockLevelChangedQueue() {
+        return consumerQueue(MessagingConstants.PRODUCT_STOCK_LEVEL_CHANGED_QUEUE,
+                inventoryExchange(), MessagingConstants.STOCK_LEVEL_CHANGED_KEY);
     }
 
     private Declarables consumerQueue(String name, TopicExchange exchange, String routingKey) {

@@ -16,6 +16,7 @@ import com.shop.inventory.entity.StockMovement;
 import com.shop.inventory.entity.StockReservation;
 import com.shop.inventory.mapper.InventoryMapperImpl;
 import com.shop.inventory.messaging.outbox.OutboxService;
+import com.shop.inventory.messaging.outbox.StockLevelNotifier;
 import com.shop.inventory.repository.InventoryItemRepository;
 import com.shop.inventory.repository.StockMovementRepository;
 import com.shop.inventory.repository.StockReservationRepository;
@@ -58,6 +59,8 @@ class StockReservationServiceImplTest {
     private StockMovementRepository stockMovementRepository;
     @Mock
     private OutboxService outboxService;
+    @Mock
+    private StockLevelNotifier stockLevelNotifier;
 
     private StockReservationServiceImpl service;
     private final UUID orderId = UUID.randomUUID();
@@ -66,7 +69,7 @@ class StockReservationServiceImplTest {
     void setUp() {
         service = new StockReservationServiceImpl(reservationRepository, inventoryItemRepository,
                 stockMovementRepository, outboxService, new InventoryMapperImpl(), Clock.fixed(NOW, ZoneOffset.UTC),
-                new CommonMessagesAutoConfiguration().messageSource());
+                new CommonMessagesAutoConfiguration().messageSource(), stockLevelNotifier);
     }
 
     @Test
@@ -87,6 +90,8 @@ class StockReservationServiceImplTest {
         verify(stockMovementRepository, times(2)).save(any(StockMovement.class));
         verify(outboxService).enqueue(eq(MessagingConstants.INVENTORY_EXCHANGE), eq(MessagingConstants.STOCK_RESERVED_KEY),
                 any(StockReservedEvent.class), eq(orderId));
+        verify(stockLevelNotifier).stockChanged(phone, 10);
+        verify(stockLevelNotifier).stockChanged(cable, 5);
     }
 
     @Test
@@ -118,6 +123,18 @@ class StockReservationServiceImplTest {
     @Test
     void reserve_failsMalformedOrderWithoutTouchingStock() {
         service.reserve(orderCreated(line(1L, 0)));
+
+        StockReservation saved = savedReservation();
+        assertThat(saved.getStatus()).isEqualTo(ReservationStatus.FAILED);
+        assertThat(saved.getFailureReason()).isEqualTo("В заказе есть некорректная позиция");
+        verify(inventoryItemRepository, never()).findAllForUpdate(any());
+        verify(outboxService).enqueue(anyString(), eq(MessagingConstants.STOCK_RESERVATION_FAILED_KEY), any(), any());
+    }
+
+    @Test
+    void reserve_failsDuplicateLinesWhoseTotalOverflows() {
+        // The sum of the two lines does not fit in an int: it must not wrap around to a negative quantity
+        service.reserve(orderCreated(line(1L, Integer.MAX_VALUE), line(1L, 2)));
 
         StockReservation saved = savedReservation();
         assertThat(saved.getStatus()).isEqualTo(ReservationStatus.FAILED);
@@ -262,7 +279,7 @@ class StockReservationServiceImplTest {
 
     private OrderConfirmedEvent orderConfirmed() {
         return new OrderConfirmedEvent(UUID.randomUUID(), NOW, orderId, "ORD-1", UUID.randomUUID(),
-                "jane@example.com", BigDecimal.TEN, "RUB");
+                "jane@example.com", BigDecimal.TEN, "RUB", "ONLINE");
     }
 
     private OrderCancelledEvent orderCancelled() {

@@ -12,6 +12,7 @@ import com.shop.common.event.ProductCreatedEvent;
 import com.shop.common.event.StockReleasedEvent;
 import com.shop.common.event.StockReservationFailedEvent;
 import com.shop.common.event.StockReservedEvent;
+import com.shop.common.messaging.RabbitTopology;
 import com.shop.common.security.HmacJwtSupport;
 import com.shop.common.security.JwtClaimNames;
 import com.shop.common.security.JwtProperties;
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.AmqpAdmin;
 import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.Queue;
+import org.springframework.amqp.core.QueueInformation;
 import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -119,7 +121,8 @@ class InventorySagaIntegrationTest {
         assertThat(stock(19L).at("/data/quantityReserved").asInt()).isEqualTo(5);
 
         publishOrderEvent(MessagingConstants.ORDER_CONFIRMED_KEY, new OrderConfirmedEvent(UUID.randomUUID(),
-                Instant.now(), orderId, "ORD-COMMIT", UUID.randomUUID(), "jane@example.com", BigDecimal.TEN, "RUB"));
+                Instant.now(), orderId, "ORD-COMMIT", UUID.randomUUID(), "jane@example.com", BigDecimal.TEN, "RUB",
+                "ONLINE"));
         waitUntil(() -> inventoryItemRepository.findById(19L).orElseThrow().getQuantityOnHand() == 195);
 
         assertThat(stock(19L).at("/data/quantityReserved").asInt()).isZero();
@@ -174,6 +177,19 @@ class InventorySagaIntegrationTest {
         assertThat(stock(21L).at("/data/quantityReserved").asInt()).isZero();
         assertThat(stock(21L).at("/data/quantityOnHand").asInt()).isEqualTo(70);
         waitUntil(() -> outboxEventRepository.countByPublishedAtIsNull() == 0);
+    }
+
+    @Test
+    void initialStockLevelsWaitForProductServiceInItsQueue() throws Exception {
+        // product-service is not running: the stock levels queued by V5 must not be dropped as unroutable
+        waitUntil(() -> outboxEventRepository.countByPublishedAtIsNull() == 0);
+
+        QueueInformation queue = amqpAdmin.getQueueInfo(MessagingConstants.PRODUCT_STOCK_LEVEL_CHANGED_QUEUE);
+        assertThat(queue).as("queue %s", MessagingConstants.PRODUCT_STOCK_LEVEL_CHANGED_QUEUE).isNotNull();
+        // One event per seeded product, plus those of the other tests
+        assertThat(queue.getMessageCount()).isGreaterThanOrEqualTo(24);
+        assertThat(amqpAdmin.getQueueInfo(
+                RabbitTopology.deadLetterQueueName(MessagingConstants.PRODUCT_STOCK_LEVEL_CHANGED_QUEUE))).isNotNull();
     }
 
     @Test

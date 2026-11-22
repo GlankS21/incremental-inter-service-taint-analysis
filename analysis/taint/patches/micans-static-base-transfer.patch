@@ -1,0 +1,15 @@
+--- a/src/main/java/pascal/taie/analysis/pta/plugin/taint/TransferHandler.java
++++ b/src/main/java/pascal/taie/analysis/pta/plugin/taint/TransferHandler.java
+@@ -115,6 +115,12 @@
+     private void processTransfer(Context context, Invoke callSite, TaintTransfer transfer) {
+         IndexRef from = transfer.from();
+         IndexRef to = transfer.to();
++        // vkr: a wildcard transfer (<pkg.*: * *()>, from base) also matches static methods
++        // (e.g. a Lombok builder()), which have no base variable
++        if (callSite.isStatic()
++                && (from.index() == InvokeUtils.BASE || to.index() == InvokeUtils.BASE)) {
++            return;
++        }
+         Var toVar = InvokeUtils.getVar(callSite, to.index());
+         if (toVar == null) {
+             return;

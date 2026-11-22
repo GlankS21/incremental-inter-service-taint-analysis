@@ -1,5 +1,6 @@
 package com.shop.notification.entity;
 
+import com.shop.common.util.TextUtils;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -28,6 +29,8 @@ import java.util.UUID;
 public class Notification extends AuditableEntity {
 
     static final int MAX_ERROR_LENGTH = 1000;
+    /** Replaces a confidential body once it is no longer needed for delivery. */
+    public static final String ERASED_BODY = "[erased]";
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -53,8 +56,13 @@ public class Notification extends AuditableEntity {
     @Column(nullable = false, length = 255, updatable = false)
     private String subject;
 
-    @Column(nullable = false, columnDefinition = "text", updatable = false)
+    /** A confidential body is erased once sent or expired (see {@link NotificationType#hasConfidentialBody()}). */
+    @Column(nullable = false, columnDefinition = "text")
     private String body;
+
+    /** End of validity of the link in the e-mail; never sent afterwards. */
+    @Column(name = "expires_at", updatable = false)
+    private Instant expiresAt;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
@@ -77,11 +85,27 @@ public class Notification extends AuditableEntity {
         status = NotificationStatus.SENT;
         sentAt = at;
         lastError = null;
+        eraseConfidentialBody();
+    }
+
+    public void markExpired() {
+        status = NotificationStatus.EXPIRED;
+        eraseConfidentialBody();
+    }
+
+    public boolean isExpired(Instant now) {
+        return expiresAt != null && !now.isBefore(expiresAt);
+    }
+
+    private void eraseConfidentialBody() {
+        if (type != null && type.hasConfidentialBody()) {
+            body = ERASED_BODY;
+        }
     }
 
     public void markFailed(String error) {
         attempts++;
         status = NotificationStatus.FAILED;
-        lastError = error == null || error.length() <= MAX_ERROR_LENGTH ? error : error.substring(0, MAX_ERROR_LENGTH);
+        lastError = TextUtils.truncate(error, MAX_ERROR_LENGTH);
     }
 }

@@ -10,6 +10,7 @@ import org.mapstruct.Named;
 public interface NotificationMapper {
 
     @Mapping(target = "body", source = ".", qualifiedByName = "visibleBody")
+    @Mapping(target = "channel", expression = "java(notification.getType() == null ? null : notification.getType().channel())")
     NotificationResponse toResponse(Notification notification);
 
     /**

@@ -6,7 +6,7 @@ import { StockForms } from "@/components/admin/StockForms";
 import { Pagination, pageIndex } from "@/components/Pagination";
 import { Badge, PageTitle } from "@/components/ui";
 import { formatDateTime } from "@/lib/format";
-import { apiGet, apiGetOrNotFound, query } from "@/lib/server/data";
+import { apiGet, apiGetOrNotFound, keepPageInRange, query } from "@/lib/server/data";
 import { param, positiveInt, type SearchParams } from "@/lib/search-params";
 import type { InventoryItem, PageResponse, Product, StockMovement } from "@/lib/types";
 
@@ -32,6 +32,7 @@ export default async function InventoryItemPage({ params, searchParams }: Props)
     getTranslations("adminInventory"),
     getTranslations("movementType"),
   ]);
+  keepPageInRange(page, movements, `/admin/inventory/${productId}`, {});
 
   const signed = (value: number) => (value > 0 ? `+${value}` : value === 0 ? "0" : String(value));
 

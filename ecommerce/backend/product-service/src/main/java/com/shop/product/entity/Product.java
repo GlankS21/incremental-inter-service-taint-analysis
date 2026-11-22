@@ -3,6 +3,7 @@ package com.shop.product.entity;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EntityListeners;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
@@ -31,6 +32,7 @@ import java.util.List;
 @Setter
 @NoArgsConstructor
 @Entity
+@EntityListeners(CatalogChangeListener.class)
 @Table(name = "products")
 public class Product extends AuditableEntity {
 
@@ -80,6 +82,17 @@ public class Product extends AuditableEntity {
 
     @Column(name = "rating_count", nullable = false, insertable = false, updatable = false)
     private int ratingCount;
+
+    /**
+     * Some units can be sold, as last reported by inventory-service ({@code stock.level-changed}); a new
+     * product is out of stock until counted. Maintained with a bulk update, never through this entity.
+     */
+    @Column(name = "in_stock", nullable = false, insertable = false, updatable = false)
+    private boolean inStock;
+
+    /** Delivered orders containing the product; maintained with a bulk update by the purchase service. */
+    @Column(name = "sales_count", nullable = false, insertable = false, updatable = false)
+    private int salesCount;
 
     /** Batch-fetched so that a page of products loads its thumbnails in one extra query. */
     @BatchSize(size = 100)

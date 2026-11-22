@@ -4,6 +4,7 @@ import com.shop.common.constant.MessagingConstants;
 import com.shop.common.event.OrderCancelledEvent;
 import com.shop.common.event.OrderConfirmedEvent;
 import com.shop.common.event.OrderCreatedEvent;
+import com.shop.common.event.OrderDeliveredEvent;
 import com.shop.notification.service.NotificationService;
 import com.shop.notification.template.NotificationTemplates;
 import lombok.RequiredArgsConstructor;
@@ -13,7 +14,7 @@ import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
 
 /**
- * One queue carries the three order events; the handler is chosen from the event type in the message
+ * One queue carries the four order events; the handler is chosen from the event type in the message
  * headers. Failures are retried by the listener container and then dead-lettered to
  * {@code notification.order-events.dlq}. A failed e-mail delivery is not a failure here: it is
  * recorded and retried by the notification retry job.
@@ -46,5 +47,15 @@ public class OrderEventsConsumer {
         log.info("Received {} (event {}) for order {}",
                 MessagingConstants.ORDER_CANCELLED_KEY, event.eventId(), event.orderNumber());
         notificationService.notify(event.eventId(), templates.orderCancelled(event));
+    }
+
+    /**
+     * «Оцените покупку» in the account (no e-mail: the reminder comes later, see {@link ProductEventsConsumer}).
+     */
+    @RabbitHandler
+    public void onOrderDelivered(OrderDeliveredEvent event) {
+        log.info("Received {} (event {}) for order {}",
+                MessagingConstants.ORDER_DELIVERED_KEY, event.eventId(), event.orderNumber());
+        notificationService.notify(event.eventId(), templates.reviewRequest(event));
     }
 }

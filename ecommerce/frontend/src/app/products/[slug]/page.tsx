@@ -5,9 +5,10 @@ import { cache } from "react";
 import { Price } from "@/components/Price";
 import { AddToCart } from "@/components/product/AddToCart";
 import { ImageGallery } from "@/components/product/ImageGallery";
-import { ProductReviews, REVIEWS_PAGE_SIZE } from "@/components/product/ProductReviews";
+import { ProductReviews } from "@/components/product/ProductReviews";
 import { RatingStars } from "@/components/product/RatingStars";
 import { Badge } from "@/components/ui";
+import { REVIEWS_PAGE_SIZE } from "@/lib/reviews";
 import { apiGet, apiGetOrNotFound } from "@/lib/server/data";
 import type { PageResponse, Product, Review, StockAvailability } from "@/lib/types";
 

@@ -145,10 +145,28 @@ class ProductCatalogIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
                 .andExpect(jsonPath("$.message").value(
-                        "Товары можно сортировать только по полям: createdAt, name, price, ratingAverage, sku, updatedAt"));
+                        "Товары можно сортировать только по полям: createdAt, name, price, ratingAverage, relevance, "
+                                + "salesCount, sku, updatedAt"));
         mockMvc.perform(get("/api/products").param("minPrice", "500").param("maxPrice", "100"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Минимальная цена не может быть больше максимальной"));
+    }
+
+    @Test
+    void priceFiltersOutsideThePriceColumnAreRejected() throws Exception {
+        List<List<String>> invalid = List.of(List.of("minPrice", "1e200000"), List.of("maxPrice", "1000000000000"),
+                List.of("maxPrice", "0.001"), List.of("minPrice", "-1"));
+        for (List<String> filter : invalid) {
+            mockMvc.perform(get("/api/products").param(filter.get(0), filter.get(1)).param("keyword", "чехол"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                    .andExpect(jsonPath("$.violations.length()").value(1))
+                    .andExpect(jsonPath("$.violations[0].field").value(filter.get(0)))
+                    .andExpect(jsonPath("$.violations[0].message").value(
+                            "Цена должна быть от 0 до 999 999 999 999,99 с точностью до копейки"));
+        }
+        assertThat(getJson(get("/api/products").param("minPrice", "0").param("maxPrice", "999999999999.99"))
+                .at("/data/totalElements").asInt()).isEqualTo(ACTIVE_SEED_PRODUCTS);
     }
 
     @Test

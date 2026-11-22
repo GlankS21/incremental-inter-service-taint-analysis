@@ -8,6 +8,7 @@ import { useCart, useSession } from "@/components/providers";
 import { Alert, Button } from "@/components/ui";
 import { api } from "@/lib/client/api";
 import { useErrorMessage } from "@/lib/client/use-error-message";
+import { clampQuantity, quantityDraft } from "@/lib/quantity";
 
 const MAX_PER_LINE = 99;
 
@@ -19,19 +20,23 @@ export function AddToCart({ productId, available }: { productId: number; availab
   const { refresh } = useCart();
   const router = useRouter();
   const pathname = usePathname();
-  const [quantity, setQuantity] = useState(1);
+  // The typed text: the field can be emptied to type another number, it is clamped on blur and submit
+  const [draft, setDraft] = useState("1");
   const [state, setState] = useState<{ kind: "idle" | "saving" } | { kind: "added" } | { kind: "error"; message: string }>({
     kind: "idle",
   });
 
   const max = Math.max(1, Math.min(MAX_PER_LINE, available ?? MAX_PER_LINE));
   const soldOut = available !== null && available <= 0;
+  const quantity = clampQuantity(draft, max);
+  const setQuantity = (value: number) => setDraft(String(value));
 
   const add = async (thenCheckout: boolean) => {
     if (!session) {
       router.push(`/login?next=${encodeURIComponent(pathname)}`);
       return;
     }
+    setQuantity(quantity);
     setState({ kind: "saving" });
     try {
       await api.post("/cart/items", { productId, quantity });
@@ -57,7 +62,7 @@ export function AddToCart({ productId, available }: { productId: number; availab
           <button
             type="button"
             className="px-3 py-2 text-lg text-slate-600 hover:bg-slate-50 disabled:text-slate-300"
-            onClick={() => setQuantity((value) => Math.max(1, value - 1))}
+            onClick={() => setQuantity(Math.max(1, quantity - 1))}
             disabled={quantity <= 1}
             aria-label={t("decrease")}
           >
@@ -67,18 +72,16 @@ export function AddToCart({ productId, available }: { productId: number; availab
             type="number"
             min={1}
             max={max}
-            value={quantity}
-            onChange={(event) => {
-              const value = Number.parseInt(event.target.value, 10);
-              setQuantity(Number.isFinite(value) ? Math.min(max, Math.max(1, value)) : 1);
-            }}
+            value={draft}
+            onChange={(event) => setDraft(quantityDraft(event.target.value))}
+            onBlur={() => setQuantity(quantity)}
             className="w-14 border-x border-slate-300 py-2 text-center text-sm focus:outline-none"
             aria-label={t("quantity")}
           />
           <button
             type="button"
             className="px-3 py-2 text-lg text-slate-600 hover:bg-slate-50 disabled:text-slate-300"
-            onClick={() => setQuantity((value) => Math.min(max, value + 1))}
+            onClick={() => setQuantity(Math.min(max, quantity + 1))}
             disabled={quantity >= max}
             aria-label={t("increase")}
           >

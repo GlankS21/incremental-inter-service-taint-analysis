@@ -1,6 +1,7 @@
 package com.shop.order.entity;
 
 import com.shop.common.exception.BusinessException;
+import com.shop.common.util.TextUtils;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Embedded;
@@ -236,9 +237,6 @@ public class Order extends AuditableEntity {
     }
 
     static String truncate(String reason) {
-        if (reason == null) {
-            return null;
-        }
-        return reason.length() <= MAX_REASON_LENGTH ? reason : reason.substring(0, MAX_REASON_LENGTH);
+        return TextUtils.truncate(reason, MAX_REASON_LENGTH);
     }
 }

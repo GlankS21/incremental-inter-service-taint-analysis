@@ -32,6 +32,11 @@ public class RabbitMQConfig {
     }
 
     @Bean
+    public TopicExchange productExchange() {
+        return RabbitTopology.topicExchange(MessagingConstants.PRODUCT_EXCHANGE);
+    }
+
+    @Bean
     public DirectExchange deadLetterExchange() {
         return RabbitTopology.deadLetterExchange();
     }
@@ -41,7 +46,8 @@ public class RabbitMQConfig {
         return consumerQueue(MessagingConstants.NOTIFICATION_ORDER_EVENTS_QUEUE, orderExchange(),
                 MessagingConstants.ORDER_CREATED_KEY,
                 MessagingConstants.ORDER_CONFIRMED_KEY,
-                MessagingConstants.ORDER_CANCELLED_KEY);
+                MessagingConstants.ORDER_CANCELLED_KEY,
+                MessagingConstants.ORDER_DELIVERED_KEY);
     }
 
     @Bean
@@ -49,6 +55,12 @@ public class RabbitMQConfig {
         return consumerQueue(MessagingConstants.NOTIFICATION_USER_EVENTS_QUEUE, userExchange(),
                 MessagingConstants.USER_REGISTERED_KEY,
                 MessagingConstants.USER_PASSWORD_RESET_REQUESTED_KEY);
+    }
+
+    @Bean
+    public Declarables productEventsQueue() {
+        return consumerQueue(MessagingConstants.NOTIFICATION_PRODUCT_EVENTS_QUEUE, productExchange(),
+                MessagingConstants.REVIEW_REMINDER_DUE_KEY);
     }
 
     private Declarables consumerQueue(String name, TopicExchange exchange, String... routingKeys) {
