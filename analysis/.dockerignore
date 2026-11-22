@@ -1,0 +1,6 @@
+**/target
+**/__pycache__
+taint/launcher/classes
+taint/work
+experiments/public/results
+Dockerfile

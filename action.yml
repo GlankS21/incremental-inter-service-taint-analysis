@@ -1,0 +1,151 @@
+name: vkr-taint
+description: >-
+  Incremental inter-service taint analysis of a Spring Cloud (Maven) repository: only services whose
+  analysis inputs changed are re-analysed with Micans, the per-service summaries are composed along the
+  HTTP, AMQP and shared-table channels, and the chains to a sink are reported as SARIF.
+author: GlankS21
+
+inputs:
+  path:
+    description: Project root (the Maven multi-module build), relative to the workspace.
+    default: .
+  config:
+    description: vkr-taint.yml, relative to the workspace (default <path>/vkr-taint.yml, else everything detected).
+    default: ''
+  services:
+    description: Analyse only these services (comma-separated).
+    default: ''
+  gate:
+    description: Fail on a chain that the baseline does not have, or on a service whose analysis failed.
+    default: 'true'
+  heap:
+    description: Micans heap (the 16 GB GitHub-hosted runner leaves about 12g).
+    default: 12g
+  upload-sarif:
+    description: Upload the SARIF to GitHub code scanning (needs permissions security-events write).
+    default: 'true'
+  baseline-branch:
+    description: Pushes to this branch store their report as the baseline that pull requests are compared with.
+    default: ${{ github.event.repository.default_branch }}
+
+outputs:
+  chains:
+    description: Number of chains to a sink.
+    value: ${{ steps.run.outputs.chains }}
+  new:
+    description: Number of chains that the baseline does not have.
+    value: ${{ steps.run.outputs.new }}
+  sarif:
+    description: Path of the SARIF file.
+    value: ${{ steps.run.outputs.sarif }}
+
+runs:
+  using: composite
+  steps:
+    # The image builds Micans from its published source (AGPL-3.0, Zenodo 10.5281/zenodo.15050505); the
+    # layers are cached in the Actions cache, so the build runs once per change of the tool.
+    - uses: docker/setup-buildx-action@v3
+    - uses: docker/build-push-action@v6
+      with:
+        context: ${{ github.action_path }}/analysis
+        tags: vkr-taint:action
+        load: true
+        cache-from: type=gha,scope=vkr-taint-image
+        cache-to: type=gha,mode=max,scope=vkr-taint-image
+
+    # analysis cache: content-addressed inside, so the newest one of any earlier run is safe to reuse
+    - uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.temp }}/vkr-cache
+        key: vkr-taint-cache-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: vkr-taint-cache-
+    - uses: actions/cache/restore@v4
+      if: github.event_name == 'pull_request'
+      with:
+        path: ${{ runner.temp }}/vkr-baseline
+        key: vkr-taint-baseline-${{ github.event.pull_request.base.sha }}
+        restore-keys: vkr-taint-baseline-
+
+    - id: run
+      shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_SERVICES: ${{ inputs.services }}
+        INPUT_GATE: ${{ inputs.gate }}
+        INPUT_HEAP: ${{ inputs.heap }}
+      run: |
+        out="$RUNNER_TEMP/vkr-out"
+        mkdir -p "$out" "$RUNNER_TEMP/vkr-cache" "$RUNNER_TEMP/vkr-baseline"
+        args=("/repo/$INPUT_PATH" --build none --out /out)
+        [ -n "$INPUT_CONFIG" ] && args+=(--config "/repo/$INPUT_CONFIG")
+        [ -n "$INPUT_SERVICES" ] && args+=(--services "$INPUT_SERVICES")
+        if [ -f "$RUNNER_TEMP/vkr-baseline/report.json" ]; then
+          args+=(--baseline /baseline/report.json)
+          [ "$INPUT_GATE" = true ] && args+=(--gate)
+        else
+          echo "::notice::no baseline report yet: chains are listed but not compared"
+          args+=(--no-gate)
+        fi
+        code=0
+        docker run --rm -e VKR_HEAP="$INPUT_HEAP" \
+          -v "$GITHUB_WORKSPACE:/repo" -v "$RUNNER_TEMP/vkr-cache:/cache" \
+          -v "$RUNNER_TEMP/vkr-baseline:/baseline:ro" -v "$out:/out" \
+          vkr-taint:action "${args[@]}" || code=$?
+        # the container runs as root: give the runner user the files the next steps read and cache
+        sudo chown -R "$(id -u):$(id -g)" "$out" "$RUNNER_TEMP/vkr-cache"
+        echo "code=$code" >> "$GITHUB_OUTPUT"
+        echo "sarif=$out/vkr-taint.sarif" >> "$GITHUB_OUTPUT"
+        [ -f "$out/vkr-taint.sarif" ] && echo "has-sarif=true" >> "$GITHUB_OUTPUT"
+        if [ -f "$out/vkr-taint-report.json" ]; then
+          python3 - "$out/vkr-taint-report.json" >> "$GITHUB_OUTPUT" <<'EOF'
+        import json, sys
+        r = json.load(open(sys.argv[1], encoding='utf-8'))
+        print(f"chains={len(r['chains'])}")
+        print(f"new={len(r.get('new', []))}")
+        EOF
+          python3 "$GITHUB_ACTION_PATH/analysis/taint/scripts/report_md.py" "$out/vkr-taint-report.json" \
+            >> "$GITHUB_STEP_SUMMARY" || true
+        fi
+
+    - uses: actions/cache/save@v4
+      if: always() && steps.run.outputs.code != ''
+      with:
+        path: ${{ runner.temp }}/vkr-cache
+        key: vkr-taint-cache-${{ github.run_id }}-${{ github.run_attempt }}
+
+    - name: Store the baseline
+      if: github.event_name == 'push' && github.ref_name == inputs.baseline-branch && steps.run.outputs.code == '0'
+      shell: bash
+      run: |
+        mkdir -p "$RUNNER_TEMP/vkr-baseline-new"
+        cp "$RUNNER_TEMP/vkr-out/vkr-taint-report.json" "$RUNNER_TEMP/vkr-baseline-new/report.json"
+    - uses: actions/cache/save@v4
+      if: github.event_name == 'push' && github.ref_name == inputs.baseline-branch && steps.run.outputs.code == '0'
+      with:
+        path: ${{ runner.temp }}/vkr-baseline-new
+        key: vkr-taint-baseline-${{ github.sha }}
+
+    - uses: github/codeql-action/upload-sarif@v3
+      if: always() && inputs.upload-sarif == 'true' && steps.run.outputs.has-sarif == 'true'
+      with:
+        sarif_file: ${{ steps.run.outputs.sarif }}
+        category: vkr-taint
+
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: vkr-taint-report
+        path: ${{ runner.temp }}/vkr-out
+        if-no-files-found: ignore
+
+    - name: Gate
+      if: steps.run.outputs.code != '0'
+      shell: bash
+      run: |
+        case "${{ steps.run.outputs.code }}" in
+          1) echo "::error::vkr-taint: ${{ steps.run.outputs.new }} new chain(s) to a sink, see the job summary and code scanning";;
+          2) echo "::error::vkr-taint: a service could not be analysed, its chains are missing";;
+          *) echo "::error::vkr-taint failed (exit ${{ steps.run.outputs.code }})";;
+        esac
+        exit 1
