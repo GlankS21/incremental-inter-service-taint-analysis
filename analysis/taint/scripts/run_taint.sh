@@ -29,6 +29,7 @@ start=$(date +%s)
   -Djdk.util.zip.disableZip64ExtraFieldValidation=true \
   ${VKR_WORLD_CACHE:+-Dvkr.worldCache=$VKR_WORLD_CACHE} \
   -Dvkr.skipTaintGraph=${VKR_SKIP_TFG:-true} \
+  ${VKR_RESPONSE_SINKS:+-Dvkr.responseSinks=$VKR_RESPONSE_SINKS} \
   -cp "$LC$CPSEP$MJ" vkr.MicansTaintMain "$1" \
   "$(wp "$2/app"),$(wp "$2/common")" "$(wp "$2/lib"),@$(wp "$2/libjars.txt")" "$(wp "$3")" "$(wp "$4")" \
   ${6:-ci} > "$5" 2>&1

@@ -48,7 +48,7 @@ CONFIG_SCRIPTS = ['prepare.sh', 'prep_micans.py', 'pack_jre.py', 'mk_dto_fields.
                   'mk_field_config.py', 'mk_entity_fields.py', 'mk_db_config.py', 'run_taint.sh',
                   'gen_taint_config.py', 'vkr_prepare.py', 'vkr_config.py', 'vkr_yaml.py']
 CFG = None  # the loaded vkr-taint.yml (main)
-FLOW_PREFIXES = ('TaintFlow{', 'StoreFlow{')
+FLOW_PREFIXES = ('TaintFlow{', 'StoreFlow{', 'ResponseFlow{')
 
 
 class Hasher:

@@ -40,6 +40,10 @@ def tool_env(cfg):
     env['VKR_SHARED_JARS'] = ','.join(m['artifact'] for m in cfg['shared'])
     env['VKR_HEAP'] = cfg['analysis']['heap']
     env['VKR_WORLD_CACHE'] = cfg['analysis']['world_cache']
+    if 'cwe-79' in cfg['taint']['sinks']:
+        env['VKR_RESPONSE_SINKS'] = 'true'  # vkr.plugin.ResponseBodySink
+    else:
+        env.pop('VKR_RESPONSE_SINKS', None)
     env['PYTHONUTF8'] = '1'
     env['VKR_PYTHON'] = sys.executable  # the shell scripts run Python helpers with this interpreter
     return env

@@ -73,6 +73,51 @@ CATALOGUES = {
             for m in ('info', 'warn', 'error', 'debug')
         ]),
     ],
+    'cwe-918': [
+        ('server-side request forgery (CWE-918): a request-controlled URL is opened', [
+            {'method': '<java.net.URL: java.net.URLConnection openConnection()>', 'index': 'base'},
+            {'method': '<java.net.URL: java.net.URLConnection openConnection(java.net.Proxy)>', 'index': 'base'},
+            {'method': '<java.net.URL: java.io.InputStream openStream()>', 'index': 'base'},
+            {'method': '<java.net.http.HttpRequest: java.net.http.HttpRequest$Builder newBuilder(java.net.URI)>', 'index': 0},
+            {'method': '<java.net.http.HttpRequest$Builder: java.net.http.HttpRequest$Builder uri(java.net.URI)>', 'index': 0},
+        ]),
+    ],
+    'cwe-1336': [
+        ('template injection (CWE-1336): request text is compiled as a template', [
+            {'method': '<freemarker.template.Template: void <init>(java.lang.String,java.io.Reader,freemarker.template.Configuration)>', 'index': 1},
+            {'method': '<freemarker.template.Template: void <init>(java.lang.String,java.lang.String,freemarker.template.Configuration)>', 'index': 1},
+            {'method': '<org.thymeleaf.TemplateEngine: java.lang.String process(java.lang.String,org.thymeleaf.context.IContext)>', 'index': 0},
+            {'method': '<org.thymeleaf.ITemplateEngine: java.lang.String process(java.lang.String,org.thymeleaf.context.IContext)>', 'index': 0},
+            {'method': '<org.apache.velocity.app.Velocity: boolean evaluate(org.apache.velocity.context.Context,java.io.Writer,java.lang.String,java.lang.String)>', 'index': 3},
+        ]),
+    ],
+    # CWE-79: the response body of a web handler is the sink; vkr.plugin.ResponseBodySink checks it
+    # after the analysis (a return value is not a call site), so the catalogue has no call sinks
+    'cwe-79': [],
+}
+# transfers that only a catalogue needs (the URL or template text derived from the request text)
+CATALOGUE_TRANSFERS = {
+    'cwe-918': [
+        ('<java.net.URI: java.net.URI create(java.lang.String)>', 0, 'result'),
+        ('<java.net.URI: void <init>(java.lang.String)>', 0, 'base'),
+        ('<java.net.URI: java.net.URL toURL()>', 'base', 'result'),
+        ('<java.net.URL: void <init>(java.lang.String)>', 0, 'base'),
+        ('<java.net.URL: void <init>(java.net.URL,java.lang.String)>', 1, 'base'),
+    ],
+    'cwe-1336': [
+        ('<java.io.StringReader: void <init>(java.lang.String)>', 0, 'base'),
+    ],
+}
+# HTML encoders end a flow (a Tai-e sanitizer is global: encoded text is clean for every sink)
+CATALOGUE_SANITIZERS = {
+    'cwe-79': [
+        {'kind': 'param', 'method': '<org.springframework.web.util.HtmlUtils: java.lang.String htmlEscape(java.lang.String)>', 'index': 0},
+        {'kind': 'param', 'method': '<org.springframework.web.util.HtmlUtils: java.lang.String htmlEscape(java.lang.String,java.lang.String)>', 'index': 0},
+        {'kind': 'param', 'method': '<org.apache.commons.text.StringEscapeUtils: java.lang.String escapeHtml4(java.lang.String)>', 'index': 0},
+        {'kind': 'param', 'method': '<org.apache.commons.lang3.StringEscapeUtils: java.lang.String escapeHtml4(java.lang.String)>', 'index': 0},
+        {'kind': 'param', 'method': '<org.owasp.encoder.Encode: java.lang.String forHtml(java.lang.String)>', 'index': 0},
+        {'kind': 'param', 'method': '<org.owasp.encoder.Encode: java.lang.String forHtmlContent(java.lang.String)>', 'index': 0},
+    ],
 }
 
 # RestTemplate calls of the channel model (clientKind REST_TEMPLATE): the URL (path variables and
@@ -308,6 +353,10 @@ class Service:
         with zipfile.ZipFile(self.jar) as z:
             return any(n.startswith('BOOT-INF/lib/' + prefix) for n in z.namelist())
 
+    def has_class_or_jdk(self, name):
+        """has_class, or a class of the JDK (java.*), which the JRE model always has."""
+        return name.startswith('java.') or self.has_class(name)
+
     def has_class(self, name):
         """True when the service packages the class (its own classes, a shared module or a library jar
         of its Spring Boot jar). A sink on a class the service lacks is not only useless: Tai-e makes a
@@ -507,7 +556,7 @@ def generate(cfg, model, module, java_home):
     for cat in cfg['taint']['sinks']:
         if cat in CATALOGUES:
             for title, entries in CATALOGUES[cat]:
-                kept = [e for e in entries if svc.has_class(e['method'][1:].split(':')[0].rstrip('^'))]
+                kept = [e for e in entries if svc.has_class_or_jdk(e['method'][1:].split(':')[0].rstrip('^'))]
                 if kept:
                     sink_groups.append((title, kept))
             if cat == 'cwe-89':
@@ -533,6 +582,14 @@ def generate(cfg, model, module, java_home):
                                 [{'method': m, 'from': f, 'to': t} for m, f, t in REST_TEMPLATE_TRANSFERS]))
     for title, items in JDK_TRANSFERS:
         transfer_groups.append((title, [{'method': m, 'from': f, 'to': t} for m, f, t in items]))
+    sanitizers = []
+    for cat in cfg['taint']['sinks']:
+        kept = [(m, f, t) for m, f, t in CATALOGUE_TRANSFERS.get(cat, [])
+                if svc.has_class_or_jdk(m[1:].split(':')[0])]
+        if kept:
+            transfer_groups.append((f'{cat}: request text to the URL / template it becomes',
+                                    [{'method': m, 'from': f, 'to': t} for m, f, t in kept]))
+        sanitizers += [e for e in CATALOGUE_SANITIZERS.get(cat, []) if svc.has_class_or_jdk(e['method'][1:].split(':')[0])]
 
     lines = [f'# Generated by gen_taint_config.py for {name} - do not edit; add entries to the overrides file.',
              f'# Sources = externally reachable endpoints + AMQP listeners of the channel model; sinks = sink',
@@ -554,6 +611,12 @@ def generate(cfg, model, module, java_home):
     for title, items in transfer_groups:
         lines.append(f'  # {title}')
         lines += [f'  - {dump_entry(e)}' for e in items]
+    if sanitizers:
+        lines += ['', 'sanitizers:', '  # output encoders']
+        lines += [f'  - {dump_entry(e)}' for e in sanitizers]
+    if 'cwe-79' in cfg['taint']['sinks']:
+        # also makes the run key differ: the plugin is not part of the YAML
+        lines += ['', '# response-body sinks (CWE-79): vkr.plugin.ResponseBodySink']
     app_packages = sorted({p for p in [common_package(svc.app_classes)]
                            + [common_package(class_files(d)) for d in svc.shared] if p})
     discovery = {'service': name, 'appPackages': app_packages, 'dtoPackages': dto_packages,
