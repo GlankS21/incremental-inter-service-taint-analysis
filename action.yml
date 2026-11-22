@@ -74,6 +74,7 @@ runs:
         INPUT_SERVICES: ${{ inputs.services }}
         INPUT_GATE: ${{ inputs.gate }}
         INPUT_HEAP: ${{ inputs.heap }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       run: |
         out="$RUNNER_TEMP/vkr-out"
         mkdir -p "$out" "$RUNNER_TEMP/vkr-cache" "$RUNNER_TEMP/vkr-baseline"
@@ -105,6 +106,7 @@ runs:
         print(f"new={len(r.get('new', []))}")
         EOF
           python3 "$GITHUB_ACTION_PATH/analysis/taint/scripts/report_md.py" "$out/vkr-taint-report.json" \
+            --sarif "$out/vkr-taint.sarif" --blob "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$HEAD_SHA" \
             >> "$GITHUB_STEP_SUMMARY" || true
         fi
 
