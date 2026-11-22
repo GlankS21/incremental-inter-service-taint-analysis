@@ -12,11 +12,14 @@ import com.shop.user.service.UserProfileService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.Clock;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -26,9 +29,11 @@ import java.util.UUID;
 public class UserProfileServiceImpl implements UserProfileService {
 
     static final String PROFILE_NOT_FOUND = "profile.error.not-found";
+    private static final String ID = "id";
 
     private final UserProfileRepository userProfileRepository;
     private final UserProfileMapper userProfileMapper;
+    private final Clock clock;
 
     @Override
     @Transactional
@@ -71,9 +76,10 @@ public class UserProfileServiceImpl implements UserProfileService {
     @Override
     @Transactional(readOnly = true)
     public PageResponse<UserProfileResponse> searchProfiles(String keyword, Pageable pageable) {
+        Pageable ordered = withIdTieBreaker(pageable);
         Page<UserProfile> page = StringUtils.hasText(keyword)
-                ? userProfileRepository.search(keyword.trim(), pageable)
-                : userProfileRepository.findAll(pageable);
+                ? userProfileRepository.search(escapeLike(keyword.trim()), ordered)
+                : userProfileRepository.findAll(ordered);
         return PageResponse.from(page, userProfileMapper::toResponse);
     }
 
@@ -85,17 +91,40 @@ public class UserProfileServiceImpl implements UserProfileService {
                 .orElseThrow(() -> ResourceNotFoundException.of(PROFILE_NOT_FOUND));
     }
 
+    /**
+     * The insert skips a profile created meanwhile by a concurrent first access (or the registration
+     * event), which then waits for that transaction and reads its profile.
+     */
     private UserProfile findOrCreate(UUID userId, String email) {
         return userProfileRepository.findById(userId).orElseGet(() -> {
-            log.info("Creating missing profile {} on first access", userId);
-            return userProfileRepository.saveAndFlush(UserProfile.builder()
-                    .id(userId)
-                    .email(normalize(email))
-                    .build());
+            if (userProfileRepository.insertIfAbsent(userId, normalize(email), clock.instant()) > 0) {
+                log.info("Created missing profile {} on first access", userId);
+            }
+            return userProfileRepository.findById(userId)
+                    .orElseThrow(() -> ResourceNotFoundException.of(PROFILE_NOT_FOUND));
         });
     }
 
     private String normalize(String email) {
         return email == null ? null : email.trim().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * The requested order completed by the id, so that profiles created at the same instant keep their
+     * order from one page to the next.
+     */
+    private static Pageable withIdTieBreaker(Pageable pageable) {
+        if (pageable.isUnpaged() || pageable.getSort().getOrderFor(ID) != null) {
+            return pageable;
+        }
+        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
+                pageable.getSort().and(Sort.by(Sort.Order.desc(ID))));
+    }
+
+    /**
+     * Makes {@code %}, {@code _} and {@code \} match themselves in a LIKE pattern escaped by {@code \}.
+     */
+    private static String escapeLike(String value) {
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 }

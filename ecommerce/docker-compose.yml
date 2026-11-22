@@ -220,6 +220,8 @@ services:
       <<: *client-env
       PRODUCT_DB_PASSWORD: ${PRODUCT_DB_PASSWORD}
       CATALOG_CURRENCY: ${CATALOG_CURRENCY:-RUB}
+      # Days after delivery before the review reminder e-mail (one per order)
+      REVIEW_REMINDER_DELAY_DAYS: ${REVIEW_REMINDER_DELAY_DAYS:-3}
       # Product images uploaded by administrators (kept across container rebuilds)
       PRODUCT_IMAGE_DIR: /data/product-images
     volumes:

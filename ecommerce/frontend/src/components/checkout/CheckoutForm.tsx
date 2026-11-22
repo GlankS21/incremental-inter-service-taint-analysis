@@ -2,11 +2,12 @@
 
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent, type KeyboardEvent } from "react";
+import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { AddressFields, formatAddress, readAddress } from "@/components/address/AddressFields";
 import { useCart } from "@/components/providers";
 import { OrderPayment } from "@/components/payment/OrderPayment";
 import { Alert, Button, Thumb } from "@/components/ui";
+import { newIdempotencyKey, shouldSaveAddress } from "@/lib/checkout";
 import { api } from "@/lib/client/api";
 import { useErrorMessage } from "@/lib/client/use-error-message";
 import { ApiError } from "@/lib/errors";
@@ -31,7 +32,9 @@ export function CheckoutForm({ cart, addresses, newAddressDefaults }: Props) {
   const router = useRouter();
   const { refresh } = useCart();
   // One key per visit of the checkout page: a retried or double-submitted order is not placed twice
-  const [idempotencyKey] = useState(() => crypto.randomUUID());
+  const [idempotencyKey] = useState(newIdempotencyKey);
+  // Address already put in the address book by an earlier, failed attempt of this visit
+  const savedAddress = useRef<AddressValues | null>(null);
   const [addressChoice, setAddressChoice] = useState<string>(
     addresses.find((address) => address.defaultAddress)?.id ?? addresses[0]?.id ?? NEW_ADDRESS,
   );
@@ -89,9 +92,14 @@ export function CheckoutForm({ cart, addresses, newAddressDefaults }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      if (!saved && form.get("saveAddress") === "on") {
+      if (!saved && shouldSaveAddress(form.get("saveAddress") === "on", shippingAddress, savedAddress.current)) {
         // Convenience only: the order does not depend on it
-        await api.post("/users/me/addresses", shippingAddress).catch(() => undefined);
+        await api
+          .post("/users/me/addresses", shippingAddress)
+          .then(() => {
+            savedAddress.current = shippingAddress;
+          })
+          .catch(() => undefined);
       }
       const order = await api.post<Order>(
         "/orders",

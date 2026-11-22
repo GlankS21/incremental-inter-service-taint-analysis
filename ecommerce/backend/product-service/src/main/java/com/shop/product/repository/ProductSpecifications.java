@@ -9,8 +9,9 @@ import java.util.Collection;
 import java.util.Locale;
 
 /**
- * Composable catalogue filters. Each factory returns {@code null} when its filter is not set,
- * which {@link Specification#allOf} ignores.
+ * Composable catalogue filters of browsing without keyword (keyword searches run the full-text search
+ * of {@link ProductSearchRepository}, with the same filters). Each factory returns {@code null} when its
+ * filter is not set, which {@link Specification#allOf} ignores.
  */
 public final class ProductSpecifications {
 
@@ -19,20 +20,6 @@ public final class ProductSpecifications {
 
     public static Specification<Product> hasStatus(ProductStatus status) {
         return status == null ? null : (root, query, cb) -> cb.equal(root.get("status"), status);
-    }
-
-    /**
-     * Case-insensitive match on name, SKU or brand. LIKE wildcards typed by the user are escaped.
-     */
-    public static Specification<Product> matchesKeyword(String keyword) {
-        if (keyword == null || keyword.isBlank()) {
-            return null;
-        }
-        String pattern = "%" + escapeLike(keyword.trim().toLowerCase(Locale.ROOT)) + "%";
-        return (root, query, cb) -> cb.or(
-                cb.like(cb.lower(root.get("name")), pattern, '\\'),
-                cb.like(cb.lower(root.get("sku")), pattern, '\\'),
-                cb.like(cb.lower(root.get("brand")), pattern, '\\'));
     }
 
     public static Specification<Product> inCategories(Collection<Long> categoryIds) {
@@ -53,9 +40,5 @@ public final class ProductSpecifications {
 
     public static Specification<Product> priceAtMost(BigDecimal maxPrice) {
         return maxPrice == null ? null : (root, query, cb) -> cb.lessThanOrEqualTo(root.get("price"), maxPrice);
-    }
-
-    static String escapeLike(String value) {
-        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 }

@@ -1,0 +1,32 @@
+# vkr-taint configuration of the testbed (ecommerce/backend). It lives here instead of the testbed
+# root because the testbed is not changed by the tool; relative paths are relative to this file.
+#   python -I analysis/taint/scripts/incremental.py --config analysis/taint/config/ecommerce.vkr-taint.yml
+# ECOMMERCE points at another copy of the backend (run_experiments.py analyses a copy in VKR_EXP).
+version: 1
+project:
+  root: ${ECOMMERCE:-../../../ecommerce/backend}
+  gateway-config: auto
+services:                 # the four services of the experiment (auto would also take auth, user,
+  - cart-service          # product and notification)
+  - order-service
+  - inventory-service
+  - payment-service
+shared: auto              # common-lib
+taint:
+  sinks: [cwe-89, cwe-117]
+  sources: auto
+  discovery: annotations
+  overrides: ecommerce.vkr-taint-overrides.yml
+  # VKR_BASE_CONFIG=taint-{short}.yml uses the hand-written configs of this directory instead of the
+  # generated ones (the overrides, exclusions and helpers are applied in both cases)
+  base-config: ${VKR_BASE_CONFIG:-}
+analysis:
+  context: 1-call
+  heap: ${VKR_HEAP:-24g}
+  world-cache: ${VKR_WORLD_CACHE:-off}
+toolchain:
+  java-home: ${JAVA_HOME}
+  micans-jar: ${VKR_MICANS_JAR:-${MICANS_JAR}}
+gate:
+  # run_experiments.py compares each scenario with the S00 report itself (--baseline)
+  fail-on: none

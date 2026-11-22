@@ -12,19 +12,24 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.MessageSource;
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.mapping.PropertyReferenceException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.ErrorResponseException;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.bind.ServletRequestBindingException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -46,6 +51,9 @@ import java.util.List;
  */
 @Slf4j
 public abstract class AbstractGlobalExceptionHandler {
+
+    /** Start of the message of Spring Data JPA when page × size exceeds {@code Integer.MAX_VALUE}. */
+    private static final String PAGE_OFFSET_OVERFLOW = "Page offset exceeds Integer.MAX_VALUE";
 
     private MessageSource messageSource;
 
@@ -196,6 +204,50 @@ public abstract class AbstractGlobalExceptionHandler {
                 message("error.request.endpoint-not-found", "Endpoint not found"), request, null);
     }
 
+    /**
+     * The client does not accept JSON, so no error body can be written: the status alone answers.
+     */
+    @ExceptionHandler(HttpMediaTypeNotAcceptableException.class)
+    public ResponseEntity<Void> handleNotAcceptable(HttpMediaTypeNotAcceptableException ex,
+                                                    HttpServletRequest request) {
+        log.warn("Request {} {} rejected: none of {} is acceptable", request.getMethod(), request.getRequestURI(),
+                ex.getSupportedMediaTypes());
+        return ResponseEntity.status(HttpStatus.NOT_ACCEPTABLE).build();
+    }
+
+    /**
+     * Exceptions of the framework that carry their own status ({@code ResponseStatusException}, a missing
+     * cookie or path variable...). Their reason is never returned: it may describe internals.
+     */
+    @ExceptionHandler({ErrorResponseException.class, ServletRequestBindingException.class})
+    public ResponseEntity<ErrorResponse> handleFrameworkStatus(Exception ex, HttpServletRequest request) {
+        HttpStatusCode status = ((org.springframework.web.ErrorResponse) ex).getStatusCode();
+        if (status.is5xxServerError()) {
+            log.error("Request {} {} failed with {}", request.getMethod(), request.getRequestURI(), status, ex);
+        } else {
+            log.warn("Request {} {} rejected with {}: {}", request.getMethod(), request.getRequestURI(), status,
+                    ex.getMessage());
+        }
+        ErrorCode code = errorCodeOf(status);
+        return buildResponse(code, defaultMessage(code), request, null);
+    }
+
+    /**
+     * A page number so large that its offset no longer fits the {@code int} that JPA paging uses.
+     * Any other misuse of the data access API is a bug and stays an internal error.
+     */
+    @ExceptionHandler(InvalidDataAccessApiUsageException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidDataAccessUsage(InvalidDataAccessApiUsageException ex,
+                                                                      HttpServletRequest request) {
+        if (ex.getMessage() != null && ex.getMessage().startsWith(PAGE_OFFSET_OVERFLOW)) {
+            log.warn("Request {} {} rejected: {}", request.getMethod(), request.getRequestURI(), ex.getMessage());
+            return buildResponse(ErrorCode.BAD_REQUEST,
+                    message("error.request.invalid-parameter", "Parameter '%s' has an invalid value", "page"),
+                    request, null);
+        }
+        return handleUnexpected(ex, request);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpected(Exception ex, HttpServletRequest request) {
         log.error("Unexpected error on {} {}", request.getMethod(), request.getRequestURI(), ex);
@@ -222,6 +274,22 @@ public abstract class AbstractGlobalExceptionHandler {
 
     protected String defaultMessage(ErrorCode code) {
         return message(ErrorCode.messageKeyOf(code), code.getDefaultMessage());
+    }
+
+    private static ErrorCode errorCodeOf(HttpStatusCode status) {
+        return switch (status.value()) {
+            case 401 -> ErrorCode.UNAUTHORIZED;
+            case 403 -> ErrorCode.FORBIDDEN;
+            case 404 -> ErrorCode.RESOURCE_NOT_FOUND;
+            case 405 -> ErrorCode.METHOD_NOT_ALLOWED;
+            case 409 -> ErrorCode.CONFLICT;
+            case 415 -> ErrorCode.UNSUPPORTED_MEDIA_TYPE;
+            case 422 -> ErrorCode.BUSINESS_RULE_VIOLATION;
+            case 429 -> ErrorCode.TOO_MANY_REQUESTS;
+            case 503 -> ErrorCode.SERVICE_UNAVAILABLE;
+            case 504 -> ErrorCode.GATEWAY_TIMEOUT;
+            default -> status.is4xxClientError() ? ErrorCode.BAD_REQUEST : ErrorCode.INTERNAL_ERROR;
+        };
     }
 
     protected ResponseEntity<ErrorResponse> buildResponse(ErrorCode code,

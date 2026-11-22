@@ -34,7 +34,7 @@ spring:
             - id: product-service
               uri: lb://product-service
               predicates:
-                - Path=/api/products/**,/api/categories/**,/api/reviews/**
+                - Path=/api/products/**,/api/categories/**,/api/reviews/**,/api/search/**
               filters:
                 - name: CircuitBreaker
                   args:
@@ -76,6 +76,9 @@ spring:
                   args:
                     name: payment-service
                     fallbackUri: forward:/fallback/payment-service
+              # Charging a card waits for YooKassa (5 s connect + 20 s read): give up only after it did
+              metadata:
+                response-timeout: 30000
             - id: notification-service
               uri: lb://notification-service
               predicates:
@@ -150,6 +153,9 @@ resilience4j:
     configs:
       default:
         timeout-duration: 15s
+    instances:
+      payment-service:
+        timeout-duration: 30s
 
 app:
   gateway:
@@ -198,6 +204,14 @@ app:
         - /api/auth/refresh
         - /api/auth/password/forgot
         - /api/auth/password/reset
+      # Type-ahead: the frontend asks after every pause in typing (250 ms debounce), so it gets a
+      # bucket of its own, roomy enough for fast typists but not for scraping the catalogue.
+      search-policy:
+        capacity: 30
+        refill-tokens: 10
+        refill-period: 1s
+      search-paths:
+        - /api/products/suggest
 
 springdoc:
   swagger-ui:

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { useTranslations } from "next-intl";
+import { pageHref, type PageParams } from "@/lib/pagination";
 
 interface PaginationProps {
   /** Zero-based, as in the API. */
@@ -8,7 +9,7 @@ interface PaginationProps {
   /** Path of the list page. */
   basePath: string;
   /** Current query parameters, kept on every page link. */
-  params: Record<string, string | number | undefined>;
+  params: PageParams;
 }
 
 /** Page links (1-based in the URL and on screen) around the current page. */
@@ -17,19 +18,7 @@ export function Pagination({ page, totalPages, basePath, params }: PaginationPro
   if (totalPages <= 1) {
     return null;
   }
-  const href = (target: number) => {
-    const search = new URLSearchParams();
-    for (const [key, value] of Object.entries(params)) {
-      if (value !== undefined && value !== "" && key !== "page") {
-        search.set(key, String(value));
-      }
-    }
-    if (target > 0) {
-      search.set("page", String(target + 1));
-    }
-    const text = search.toString();
-    return text ? `${basePath}?${text}` : basePath;
-  };
+  const href = (target: number) => pageHref(basePath, params, target);
 
   const pages: (number | "gap")[] = [];
   for (let index = 0; index < totalPages; index++) {

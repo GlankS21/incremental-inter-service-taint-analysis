@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { INVALID_PATH_CODE } from "@/lib/errors";
 import { readTokens } from "@/lib/server/auth-cookies";
 import { callGateway } from "@/lib/server/gateway";
 import {
@@ -30,7 +31,7 @@ async function relay(request: NextRequest, { params }: Context): Promise<NextRes
   const { path } = await params;
   const requestPath = request.nextUrl.pathname;
   if (path.some((segment) => segment === "." || segment === ".." || segment.length === 0)) {
-    return errorJson(400, "BAD_REQUEST", "Invalid path", requestPath);
+    return errorJson(400, INVALID_PATH_CODE, "Invalid path", requestPath);
   }
   const target = path.join("/");
   if (BLOCKED.has(target)) {

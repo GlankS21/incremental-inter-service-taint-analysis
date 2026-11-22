@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import type { Category } from "@/lib/types";
-import { AccountMenu, CartLink, SearchBox } from "./HeaderActions";
+import { MobileSearchButton, SearchCombobox } from "@/components/search/SearchCombobox";
+import { AccountMenu, CartLink } from "./HeaderActions";
 
 export function SiteHeader({ categories }: { categories: Category[] }) {
   const t = useTranslations("nav");
@@ -11,7 +12,8 @@ export function SiteHeader({ categories }: { categories: Category[] }) {
         <Link href="/" className="shrink-0 text-xl font-bold tracking-tight text-brand-700" aria-label={t("home")}>
           Tech<span className="text-accent-500">Shop</span>
         </Link>
-        <SearchBox />
+        <SearchCombobox />
+        <MobileSearchButton />
         <nav aria-label={t("userNav")} className="flex shrink-0 items-center gap-1">
           <CartLink />
           <AccountMenu />

@@ -20,6 +20,7 @@ import com.shop.product.repository.CategoryRepository;
 import com.shop.product.repository.ProductRepository;
 import com.shop.product.repository.ProductSpecifications;
 import com.shop.product.service.ProductService;
+import com.shop.product.util.Paging;
 import com.shop.product.util.SlugUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -76,12 +77,12 @@ public class ProductServiceImpl implements ProductService {
 
         Specification<Product> specification = Specification.allOf(
                 ProductSpecifications.hasStatus(status),
-                ProductSpecifications.matchesKeyword(criteria.keyword()),
                 ProductSpecifications.inCategories(categoryIds),
                 ProductSpecifications.hasBrand(criteria.brand()),
                 ProductSpecifications.priceAtLeast(criteria.minPrice()),
                 ProductSpecifications.priceAtMost(criteria.maxPrice()));
-        return PageResponse.from(productRepository.findAll(specification, pageable), this::toSummary);
+        return PageResponse.from(productRepository.findAll(specification, Paging.withIdTieBreaker(pageable)),
+                this::toSummary);
     }
 
     @Override

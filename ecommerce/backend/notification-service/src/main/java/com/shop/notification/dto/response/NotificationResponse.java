@@ -1,5 +1,6 @@
 package com.shop.notification.dto.response;
 
+import com.shop.notification.entity.NotificationChannel;
 import com.shop.notification.entity.NotificationStatus;
 import com.shop.notification.entity.NotificationType;
 
@@ -9,6 +10,7 @@ import java.util.UUID;
 public record NotificationResponse(
         UUID id,
         NotificationType type,
+        NotificationChannel channel,
         UUID userId,
         String recipient,
         String reference,

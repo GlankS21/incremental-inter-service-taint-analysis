@@ -13,21 +13,31 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class UserProfileServiceImplTest {
+
+    private static final Clock CLOCK = Clock.fixed(Instant.parse("2025-03-01T10:00:00Z"), ZoneOffset.UTC);
 
     @Mock
     private UserProfileRepository userProfileRepository;
@@ -37,7 +47,7 @@ class UserProfileServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new UserProfileServiceImpl(userProfileRepository, new UserProfileMapperImpl());
+        service = new UserProfileServiceImpl(userProfileRepository, new UserProfileMapperImpl(), CLOCK);
     }
 
     @Test
@@ -52,14 +62,27 @@ class UserProfileServiceImplTest {
 
     @Test
     void getOrCreateProfile_createsMissingProfileFromTokenEmail() {
-        when(userProfileRepository.findById(userId)).thenReturn(Optional.empty());
-        when(userProfileRepository.saveAndFlush(any(UserProfile.class))).thenAnswer(inv -> inv.getArgument(0));
+        UserProfile created = UserProfile.builder().id(userId).email("jane@example.com").version(0L).build();
+        when(userProfileRepository.findById(userId)).thenReturn(Optional.empty(), Optional.of(created));
+        when(userProfileRepository.insertIfAbsent(userId, "jane@example.com", CLOCK.instant())).thenReturn(1);
 
         UserProfileResponse response = service.getOrCreateProfile(userId, " Jane@Example.com ");
 
         assertThat(response.id()).isEqualTo(userId);
         assertThat(response.email()).isEqualTo("jane@example.com");
         assertThat(response.firstName()).isNull();
+        verify(userProfileRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void getOrCreateProfile_returnsProfileCreatedConcurrently() {
+        UserProfile concurrent = profile("Jane", "Doe");
+        when(userProfileRepository.findById(userId)).thenReturn(Optional.empty(), Optional.of(concurrent));
+        when(userProfileRepository.insertIfAbsent(userId, "jane@example.com", CLOCK.instant())).thenReturn(0);
+
+        UserProfileResponse response = service.getOrCreateProfile(userId, "jane@example.com");
+
+        assertThat(response.firstName()).isEqualTo("Jane");
     }
 
     @Test
@@ -117,6 +140,26 @@ class UserProfileServiceImplTest {
         when(userProfileRepository.findById(userId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.getProfile(userId)).isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void searchProfiles_breaksTiesByIdAndEscapesLikeWildcards() {
+        when(userProfileRepository.search(anyString(), any(Pageable.class)))
+                .thenAnswer(inv -> Page.empty(inv.getArgument(1)));
+        when(userProfileRepository.findAll(any(Pageable.class))).thenAnswer(inv -> Page.empty(inv.getArgument(0)));
+        Pageable requested = PageRequest.of(3, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        Sort expected = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
+
+        service.searchProfiles(" 100%_off\\ ", requested);
+        service.searchProfiles(null, requested);
+
+        ArgumentCaptor<Pageable> searched = ArgumentCaptor.forClass(Pageable.class);
+        verify(userProfileRepository).search(eq("100\\%\\_off\\\\"), searched.capture());
+        assertThat(searched.getValue().getSort()).isEqualTo(expected);
+        assertThat(searched.getValue().getPageNumber()).isEqualTo(3);
+        ArgumentCaptor<Pageable> listed = ArgumentCaptor.forClass(Pageable.class);
+        verify(userProfileRepository).findAll(listed.capture());
+        assertThat(listed.getValue().getSort()).isEqualTo(expected);
     }
 
     private UserProfile profile(String firstName, String lastName) {

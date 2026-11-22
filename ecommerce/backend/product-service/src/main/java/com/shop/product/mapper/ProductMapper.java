@@ -16,7 +16,7 @@ import org.mapstruct.MappingTarget;
 /**
  * The currency is a store-wide setting, passed in by the service. SKU, slug, category, status and
  * images are resolved by the service, never copied from the request; the rating summary is maintained
- * by the review service.
+ * by the review service, the stock flag and the sales count by their own bulk updates.
  */
 @Mapper
 public interface ProductMapper {
@@ -47,6 +47,8 @@ public interface ProductMapper {
     @Mapping(target = "images", ignore = true)
     @Mapping(target = "ratingAverage", ignore = true)
     @Mapping(target = "ratingCount", ignore = true)
+    @Mapping(target = "inStock", ignore = true)
+    @Mapping(target = "salesCount", ignore = true)
     @Mapping(target = "version", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)

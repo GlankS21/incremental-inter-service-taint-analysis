@@ -11,7 +11,7 @@
 | Аутентификация | Проверка JWT HS256 (подпись, срок, `iss`, `token_type=access`). Сервисы за gateway проверяют токен повторно |
 | Идентичность для сервисов | Удаляет все заголовки `X-User-*`, присланные клиентом, затем добавляет `X-User-Id`, `X-User-Email`, `X-User-Roles` из JWT |
 | CORS | Настраивается только в gateway (`CORS_ALLOWED_ORIGINS`), на preflight отвечает до этапа аутентификации |
-| Rate limiting | Token bucket по адресу клиента: по умолчанию burst 40 запросов, 20/с; `/api/auth/login|register|refresh` — 10/мин. При превышении → 429 + `Retry-After` |
+| Rate limiting | Token bucket по адресу клиента: по умолчанию burst 40 запросов, 20/с; `/api/auth/login|register|refresh` — 10/мин; `/api/products/suggest` (подсказки поиска) — отдельный bucket: burst 30, 10/с. При превышении → 429 + `Retry-After` |
 | Доверенный прокси | Фронтенд (BFF) передаёт `X-Client-Ip` + `X-Proxy-Secret`; адрес используется для rate limit только если секрет совпадает с `TRUSTED_PROXY_SECRET`. Оба заголовка всегда удаляются перед передачей в сервис |
 | Отказоустойчивость | Circuit breaker Resilience4j для каждого маршрута, fallback 503 на `/fallback/<service>` |
 | Correlation id | Принимает или генерирует `X-Correlation-Id`, передаёт в сервис, возвращает клиенту, пишет в access log |
@@ -24,7 +24,7 @@
 |---|---|
 | `/api/auth/**` | auth-service |
 | `/api/users/**` | user-service |
-| `/api/products/**`, `/api/categories/**` | product-service |
+| `/api/products/**`, `/api/categories/**`, `/api/reviews/**`, `/api/search/**` | product-service |
 | `/api/inventory/**` | inventory-service |
 | `/api/cart/**` | cart-service |
 | `/api/orders/**` | order-service |

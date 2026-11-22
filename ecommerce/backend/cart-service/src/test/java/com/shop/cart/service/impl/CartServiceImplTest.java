@@ -198,9 +198,11 @@ class CartServiceImplTest {
     @Test
     void removeOrderedProducts_keepsTheOtherLines() {
         Cart cart = cart(line(1L, 1, "1000"), line(2L, 1, "1000"));
+        UUID eventId = UUID.randomUUID();
+        when(cartRepository.markEventProcessed(eventId)).thenReturn(1);
         when(cartRepository.findByUserIdForUpdate(USER)).thenReturn(Optional.of(cart));
 
-        service.removeOrderedProducts(new OrderCreatedEvent(UUID.randomUUID(), Instant.now(), UUID.randomUUID(),
+        service.removeOrderedProducts(new OrderCreatedEvent(eventId, Instant.now(), UUID.randomUUID(),
                 "ORD-20261021-ABCDEF", USER, "jane@example.com",
                 List.of(new OrderItemPayload(1L, "SKU-1", "Товар 1", 1, new BigDecimal("1000"))),
                 new BigDecimal("1000"), "RUB"));

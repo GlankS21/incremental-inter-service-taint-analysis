@@ -12,6 +12,9 @@ spring:
       - optional:file:../.env[.properties]
       - optional:file:../../.env[.properties]
       - optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}
+  rabbitmq:
+    # Required by the review reminder job, which waits for the broker to confirm each reminder
+    publisher-confirm-type: simple
   cloud:
     config:
       username: ${CONFIG_SERVER_USERNAME}

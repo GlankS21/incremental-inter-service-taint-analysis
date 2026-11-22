@@ -14,6 +14,13 @@ public final class ValidationPatterns {
     public static final String SLUG = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
     public static final String SLUG_MESSAGE = "{validation.slug}";
 
+    /**
+     * Synonym term: letters and digits, words separated by a space or a hyphen; surrounding white space is
+     * allowed (the service trims it).
+     */
+    public static final String SYNONYM_TERM = "^\\s*[\\p{L}\\p{N}]+(?:[ -][\\p{L}\\p{N}]+)*\\s*$";
+    public static final String SYNONYM_TERM_MESSAGE = "{validation.synonym-term}";
+
     public static final String HTTP_URL = "^https?://\\S+$";
     public static final String HTTP_URL_MESSAGE = "{validation.http-url}";
 

@@ -1,0 +1,13 @@
+--- a/src/main/java/micans/plugin/spring/SpringIocAnalysis.java	2026-11-19 17:17:47.258000700 +0300
++++ b/src/main/java/micans/plugin/spring/SpringIocAnalysis.java	2026-11-19 17:17:47.310875400 +0300
+@@ -155,7 +155,9 @@
+         // create custom beans
+         for (String customBeanClass : activatedBeanClasses) {
+             JClass clz = classHierarchy.getClass(customBeanClass);
+-            if (clz != null) {
++            // vkr: a custom bean whose class the service does not package is only a phantom class
++            // (referenced by a library, e.g. JdbcTemplate without spring-jdbc) and has no constructor
++            if (clz != null && !clz.isPhantom()) {
+                 visitBeanClass(clz, (Annotation) null);
+             }
+         }

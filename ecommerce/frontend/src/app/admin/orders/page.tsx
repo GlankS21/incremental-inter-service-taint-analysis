@@ -4,7 +4,7 @@ import { Pagination, pageIndex } from "@/components/Pagination";
 import { OrderTable } from "@/components/order/OrderTable";
 import { PageTitle } from "@/components/ui";
 import { ORDER_STATUS_TONE } from "@/lib/format";
-import { apiGet, query } from "@/lib/server/data";
+import { apiGet, keepPageInRange, query } from "@/lib/server/data";
 import { isUuid, oneOf, param, type SearchParams } from "@/lib/search-params";
 import type { OrderStatus, OrderSummary, PageResponse } from "@/lib/types";
 
@@ -30,6 +30,7 @@ export default async function AdminOrdersPage({ searchParams }: { searchParams: 
     getTranslations("adminOrders"),
     getTranslations("orderStatus"),
   ]);
+  keepPageInRange(page, orders, "/admin/orders", { status, keyword, userId });
 
   return (
     <>

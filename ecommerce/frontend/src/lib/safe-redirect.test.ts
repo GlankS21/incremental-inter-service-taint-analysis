@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { safeNext } from "./safe-redirect";
+import { loginUrl, safeNext } from "./safe-redirect";
 
 describe("safeNext", () => {
   it("keeps paths of this site", () => {
@@ -23,5 +23,16 @@ describe("safeNext", () => {
 
   it("falls back when absent", () => {
     expect(safeNext(undefined, "/account")).toBe("/account");
+  });
+});
+
+describe("loginUrl", () => {
+  it("brings the user back to the current page after signing in again", () => {
+    expect(loginUrl("/orders/123?placed=1")).toBe("/login?next=%2Forders%2F123%3Fplaced%3D1");
+  });
+
+  it("does not loop through the sign-in page", () => {
+    expect(loginUrl("/login?next=/cart")).toBe("/login");
+    expect(loginUrl("/")).toBe("/login");
   });
 });

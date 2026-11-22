@@ -6,6 +6,8 @@ import com.shop.common.dto.ApiResponse;
 import com.shop.common.event.OrderCreatedEvent;
 import com.shop.common.event.OrderItemPayload;
 import com.shop.common.exception.ServiceUnavailableException;
+import com.shop.common.messaging.DeadLetterRedriver;
+import com.shop.common.messaging.RabbitTopology;
 import com.shop.common.security.HmacJwtSupport;
 import com.shop.common.security.JwtClaimNames;
 import com.shop.common.security.JwtProperties;
@@ -13,10 +15,14 @@ import com.shop.cart.client.InventoryClient;
 import com.shop.cart.client.ProductClient;
 import com.shop.cart.client.ProductSummary;
 import com.shop.cart.client.StockAvailability;
+import com.shop.cart.dto.request.AddCartItemRequest;
 import com.shop.cart.entity.CartItem;
 import com.shop.cart.repository.CartRepository;
+import com.shop.cart.service.CartService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.core.QueueInformation;
+import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -40,6 +46,12 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -62,7 +74,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "app.security.jwt.issuer=test-issuer",
         "spring.jpa.hibernate.ddl-auto=validate",
         "app.cart.max-items=3",
-        "app.cart.max-quantity-per-item=10"
+        "app.cart.max-quantity-per-item=10",
+        // The test drives the redriver itself
+        "app.messaging.dead-letter-redrive.initial-delay=1h"
 })
 @AutoConfigureMockMvc
 @Testcontainers(disabledWithoutDocker = true)
@@ -89,6 +103,12 @@ class CartIntegrationTest {
     private RabbitTemplate rabbitTemplate;
     @Autowired
     private CartRepository cartRepository;
+    @Autowired
+    private CartService cartService;
+    @Autowired
+    private RabbitAdmin rabbitAdmin;
+    @Autowired
+    private DeadLetterRedriver deadLetterRedriver;
 
     private final UUID customerId = UUID.randomUUID();
 
@@ -186,6 +206,95 @@ class CartIntegrationTest {
         }
         assertThat(cartRepository.findByUserId(customerId).orElseThrow().getItems())
                 .extracting(CartItem::getProductId).containsExactly(19L);
+    }
+
+    @Test
+    void placedOrderSubtractsTheOrderedQuantityOnlyOnce() throws Exception {
+        add(19, 5).andExpect(status().isOk());
+        add(7, 1).andExpect(status().isOk());
+        OrderCreatedEvent event = new OrderCreatedEvent(UUID.randomUUID(), Instant.now(), UUID.randomUUID(),
+                "ORD-20261029-QTY002", customerId, "jane@example.com",
+                List.of(new OrderItemPayload(19L, "ACC-UGR-C2C", "Кабель USB-C", 2, new BigDecimal("1490"))),
+                new BigDecimal("2980"), "RUB");
+
+        cartService.removeOrderedProducts(event);
+        // At-least-once delivery: the same event may arrive again
+        cartService.removeOrderedProducts(event);
+
+        assertThat(cartRepository.findByUserId(customerId).orElseThrow().getItems())
+                .extracting(item -> item.getProductId() + "x" + item.getQuantity())
+                .containsExactly("19x3", "7x1");
+    }
+
+    @Test
+    void deadLetteredOrderIsMovedBackAndAppliedWhileAHopelessOneStaysInTheDlq() throws Exception {
+        add(19, 2).andExpect(status().isOk());
+        String deadLetterQueue = RabbitTopology.deadLetterQueueName(MessagingConstants.CART_ORDER_CREATED_QUEUE);
+        // Already moved back five times: stays for investigation, ahead of the message that can still succeed
+        rabbitTemplate.convertAndSend("", deadLetterQueue, orderOf(customerId, 19L, 1), message -> {
+            message.getMessageProperties().setHeader(DeadLetterRedriver.REDRIVE_COUNT_HEADER, 5);
+            return message;
+        });
+        rabbitTemplate.convertAndSend("", deadLetterQueue, orderOf(customerId, 19L, 1));
+        waitUntil(() -> queueDepth(deadLetterQueue) == 2);
+
+        assertThat(deadLetterRedriver.queues()).contains(MessagingConstants.CART_ORDER_CREATED_QUEUE);
+        assertThat(deadLetterRedriver.redrive(MessagingConstants.CART_ORDER_CREATED_QUEUE)).isEqualTo(1);
+
+        waitUntil(() -> cartRepository.findByUserId(customerId).orElseThrow().getItems().getFirst().getQuantity() == 1);
+        assertThat(queueDepth(deadLetterQueue)).isEqualTo(1);
+    }
+
+    @Test
+    void quantityThatWouldOverflowIsRefusedWithTheLimitMessage() throws Exception {
+        add(19, 5).andExpect(status().isOk());
+
+        add(19, Integer.MAX_VALUE).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Одного товара можно положить в корзину не больше 10 штук"));
+    }
+
+    @Test
+    void concurrentFirstAddsBothLandInTheNewCart() throws Exception {
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> first = executor.submit(() -> {
+                start.await();
+                return cartService.addItem(customerId, new AddCartItemRequest(7L, 1));
+            });
+            Future<?> second = executor.submit(() -> {
+                start.await();
+                return cartService.addItem(customerId, new AddCartItemRequest(19L, 1));
+            });
+            start.countDown();
+            first.get(15, TimeUnit.SECONDS);
+            second.get(15, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertThat(cartRepository.findByUserId(customerId).orElseThrow().getItems())
+                .extracting(CartItem::getProductId).containsExactlyInAnyOrder(7L, 19L);
+    }
+
+    private static OrderCreatedEvent orderOf(UUID customer, long productId, int quantity) {
+        return new OrderCreatedEvent(UUID.randomUUID(), Instant.now(), UUID.randomUUID(), "ORD-20261029-DLQ001",
+                customer, "jane@example.com",
+                List.of(new OrderItemPayload(productId, "ACC-UGR-C2C", "Кабель USB-C", quantity, new BigDecimal("1490"))),
+                new BigDecimal("1490").multiply(BigDecimal.valueOf(quantity)), "RUB");
+    }
+
+    private int queueDepth(String queue) {
+        QueueInformation info = rabbitAdmin.getQueueInfo(queue);
+        return info == null ? -1 : info.getMessageCount();
+    }
+
+    private static void waitUntil(BooleanSupplier condition) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 15_000;
+        while (!condition.getAsBoolean()) {
+            assertThat(System.currentTimeMillis()).as("condition met within 15 seconds").isLessThan(deadline);
+            Thread.sleep(200);
+        }
     }
 
     private ResultActions add(long productId, int quantity) throws Exception {

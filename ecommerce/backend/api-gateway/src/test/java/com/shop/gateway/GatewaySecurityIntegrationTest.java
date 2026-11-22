@@ -20,6 +20,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 /**
  * Boots the gateway without config-server, Eureka or downstream services and checks the edge
  * behaviour: authentication, error format, correlation id, CORS and rate limiting.
@@ -41,7 +43,11 @@ import java.util.UUID;
                 "app.gateway.rate-limit.auth-policy.capacity=2",
                 "app.gateway.rate-limit.auth-policy.refill-tokens=1",
                 "app.gateway.rate-limit.auth-policy.refill-period=1h",
-                "app.gateway.rate-limit.auth-paths=/api/auth/login"
+                "app.gateway.rate-limit.auth-paths=/api/auth/login",
+                "app.gateway.rate-limit.search-policy.capacity=3",
+                "app.gateway.rate-limit.search-policy.refill-tokens=1",
+                "app.gateway.rate-limit.search-policy.refill-period=1h",
+                "app.gateway.rate-limit.search-paths=/api/products/suggest"
         })
 // With RANDOM_PORT, the injected WebTestClient sends real HTTP requests to the embedded server
 // (required for CORS: the request URI must carry a host).
@@ -165,6 +171,26 @@ class GatewaySecurityIntegrationTest {
                 .expectBody()
                 .jsonPath("$.code").isEqualTo("TOO_MANY_REQUESTS")
                 .jsonPath("$.message").isEqualTo("Слишком много запросов, попробуйте позже");
+    }
+
+    @Test
+    void suggestEndpointHasItsOwnRateLimit() {
+        for (int i = 0; i < 3; i++) {
+            webTestClient.get().uri("/api/products/suggest?q=phone")
+                    .exchange()
+                    .expectStatus().value(status -> assertThat(status).isNotEqualTo(429));
+        }
+        webTestClient.get().uri("/api/products/suggest?q=phone")
+                .exchange()
+                .expectStatus().isEqualTo(429)
+                .expectHeader().exists(HttpHeaders.RETRY_AFTER)
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("TOO_MANY_REQUESTS");
+
+        // The rest of the catalogue still uses the default bucket
+        webTestClient.get().uri("/api/products/1")
+                .exchange()
+                .expectStatus().isNotFound();
     }
 
     private String accessToken(String tokenType) {

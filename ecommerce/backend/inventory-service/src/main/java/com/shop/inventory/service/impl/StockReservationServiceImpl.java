@@ -10,6 +10,7 @@ import com.shop.common.event.StockReleasedEvent;
 import com.shop.common.event.StockReservationFailedEvent;
 import com.shop.common.event.StockReservedEvent;
 import com.shop.common.exception.ResourceNotFoundException;
+import com.shop.common.util.TextUtils;
 import com.shop.inventory.dto.response.ReservationResponse;
 import com.shop.inventory.entity.InventoryItem;
 import com.shop.inventory.entity.MovementType;
@@ -19,6 +20,7 @@ import com.shop.inventory.entity.StockReservation;
 import com.shop.inventory.entity.StockReservationItem;
 import com.shop.inventory.mapper.InventoryMapper;
 import com.shop.inventory.messaging.outbox.OutboxService;
+import com.shop.inventory.messaging.outbox.StockLevelNotifier;
 import com.shop.inventory.repository.InventoryItemRepository;
 import com.shop.inventory.repository.StockMovementRepository;
 import com.shop.inventory.repository.StockReservationRepository;
@@ -55,6 +57,7 @@ public class StockReservationServiceImpl implements StockReservationService {
     private final InventoryMapper inventoryMapper;
     private final Clock clock;
     private final MessageSource messageSource;
+    private final StockLevelNotifier stockLevelNotifier;
 
     @Override
     @Transactional
@@ -94,7 +97,9 @@ public class StockReservationServiceImpl implements StockReservationService {
                 .collect(Collectors.toMap(InventoryItem::getProductId, Function.identity()));
         requested.forEach((productId, quantity) -> {
             InventoryItem item = byProductId.get(productId);
+            int previousAvailable = item.availableQuantity();
             item.reserve(quantity);
+            stockLevelNotifier.stockChanged(item, previousAvailable);
             reservation.addItem(productId, quantity);
             stockMovementRepository.save(StockMovement.of(item, MovementType.RESERVATION, 0, quantity,
                     event.orderNumber(), null, null));
@@ -189,7 +194,12 @@ public class StockReservationServiceImpl implements StockReservationService {
             if (line == null || line.productId() == null || line.quantity() <= 0) {
                 return message("inventory.reservation.error.invalid-item");
             }
-            requested.merge(line.productId(), line.quantity(), Integer::sum);
+            try {
+                // An overflowing total would wrap around to a negative quantity that passes the stock check
+                requested.merge(line.productId(), line.quantity(), Math::addExact);
+            } catch (ArithmeticException ex) {
+                return message("inventory.reservation.error.invalid-item");
+            }
         }
         return null;
     }
@@ -222,7 +232,9 @@ public class StockReservationServiceImpl implements StockReservationService {
         }
         for (InventoryItem item : items) {
             int quantity = quantities.get(item.getProductId());
+            int previousAvailable = item.availableQuantity();
             operation.accept(item, quantity);
+            stockLevelNotifier.stockChanged(item, previousAvailable);
             int onHandChange = switch (type) {
                 case SALE -> -quantity;
                 case RETURN -> quantity;
@@ -239,9 +251,6 @@ public class StockReservationServiceImpl implements StockReservationService {
     }
 
     private static String truncate(String reason) {
-        if (reason == null) {
-            return null;
-        }
-        return reason.length() <= MAX_REASON_LENGTH ? reason : reason.substring(0, MAX_REASON_LENGTH);
+        return TextUtils.truncate(reason, MAX_REASON_LENGTH);
     }
 }

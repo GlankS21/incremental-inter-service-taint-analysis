@@ -2,12 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { ReactNode } from "react";
 
 interface Tab {
   href: string;
   label: string;
   /** Highlight only on the exact path (for index pages). */
   exact?: boolean;
+  /** Shown after the label, e.g. a count. */
+  badge?: ReactNode;
 }
 
 /** Vertical navigation on large screens, horizontal scroller on small ones. */
@@ -22,11 +25,12 @@ export function NavTabs({ tabs, label }: { tabs: Tab[]; label: string }) {
             key={tab.href}
             href={tab.href}
             aria-current={active ? "page" : undefined}
-            className={`rounded-lg px-3 py-2 text-sm whitespace-nowrap ${
+            className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm whitespace-nowrap ${
               active ? "bg-brand-50 font-medium text-brand-700" : "text-slate-600 hover:bg-slate-100"
             }`}
           >
             {tab.label}
+            {tab.badge}
           </Link>
         );
       })}

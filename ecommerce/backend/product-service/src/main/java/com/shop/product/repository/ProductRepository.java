@@ -15,6 +15,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -68,4 +69,24 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
     @Query(value = "update products set rating_average = :average, rating_count = :count where id = :id",
             nativeQuery = true)
     int updateRating(@Param("id") Long id, @Param("average") BigDecimal average, @Param("count") int count);
+
+    /**
+     * Applies a stock level from inventory-service unless a later one was already applied (events may be
+     * redelivered out of order). Neither the version nor the modification time change.
+     *
+     * @return 0 for an unknown product or an outdated level
+     */
+    @Modifying(flushAutomatically = true)
+    @Query(value = """
+            update products set in_stock = :inStock, stock_updated_at = :at
+            where id = :id and (stock_updated_at is null or stock_updated_at <= :at)
+            """, nativeQuery = true)
+    int updateStock(@Param("id") Long id, @Param("inStock") boolean inStock, @Param("at") Instant at);
+
+    /**
+     * Counts new deliveries of the product (popularity of the search ranking).
+     */
+    @Modifying(flushAutomatically = true)
+    @Query(value = "update products set sales_count = sales_count + :deliveries where id = :id", nativeQuery = true)
+    int addSales(@Param("id") Long id, @Param("deliveries") int deliveries);
 }

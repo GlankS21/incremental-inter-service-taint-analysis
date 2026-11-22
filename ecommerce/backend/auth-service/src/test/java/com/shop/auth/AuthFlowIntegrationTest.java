@@ -26,12 +26,14 @@ import org.testcontainers.containers.RabbitMQContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -159,6 +161,51 @@ class AuthFlowIntegrationTest {
         assertThat(body.at("/violations/0/field").asText()).isEqualTo("password");
         assertThat(body.at("/violations/0/message").asText())
                 .isEqualTo("Пароль должен содержать хотя бы одну букву и одну цифру");
+    }
+
+    @Test
+    void passwordLongerThan72BytesIsRejectedAsValidationError() throws Exception {
+        // 42 characters but 82 UTF-8 bytes: within the character limit, beyond what bcrypt accepts.
+        String longPassword = "a1" + "я".repeat(40);
+        String accessToken = postJson("/api/auth/register", Map.of(
+                "email", "long.password@example.com",
+                "password", "Secret123",
+                "firstName", "Long",
+                "lastName", "Password"), 201)
+                .at("/data/accessToken").asText();
+
+        JsonNode register = postJson("/api/auth/register", Map.of(
+                "email", "long.password.new@example.com",
+                "password", longPassword,
+                "firstName", "Long",
+                "lastName", "Password"), 400);
+        JsonNode reset = postJson("/api/auth/password/reset",
+                Map.of("token", "any-token", "newPassword", longPassword), 400);
+        MvcResult changed = mockMvc.perform(put("/api/auth/me/password")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("currentPassword", "Secret123", "newPassword", longPassword))))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+        JsonNode change = objectMapper.readTree(changed.getResponse().getContentAsString());
+
+        for (JsonNode body : List.of(register, reset, change)) {
+            assertThat(body.at("/code").asText()).isEqualTo("VALIDATION_FAILED");
+            assertThat(body.at("/violations/0/message").asText()).isEqualTo("Пароль слишком длинный");
+        }
+    }
+
+    @Test
+    void loginWithPasswordLongerThan72BytesIsAnOrdinaryFailure() throws Exception {
+        String longPassword = "a1" + "я".repeat(40);
+
+        assertThat(postJson("/api/auth/login",
+                Map.of("email", "admin@shop.local", "password", longPassword), 401)
+                .at("/message").asText()).isEqualTo("Неверный e-mail или пароль");
+        assertThat(postJson("/api/auth/login",
+                Map.of("email", "nobody.long@example.com", "password", longPassword), 401)
+                .at("/message").asText()).isEqualTo("Неверный e-mail или пароль");
     }
 
     @Test

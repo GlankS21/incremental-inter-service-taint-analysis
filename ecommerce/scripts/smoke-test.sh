@@ -104,7 +104,7 @@ A=$DIR/admin.jar
 check "login" 200 "$(code -c "$A" -X POST -H "$ORIGIN" -H "$JSON" \
   --data-binary "$(body admin-login "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}")" "$BASE/api/auth/login")"
 check "HttpOnly session cookies" 2 "$(grep -c '^#HttpOnly_.*shop_[ar]t' "$A")"
-for page in "" /orders /products /products/new /categories /inventory /accounts /notifications; do
+for page in "" /orders /products /products/new /categories /inventory /accounts /notifications /search /search/synonyms; do
   check "page /admin$page" 200 "$(code -b "$A" "$BASE/admin$page")"
 done
 SUFFIX=$(date +%s)
@@ -119,6 +119,15 @@ check "product created" true "$([ -n "$PRODUCT_ID" ] && echo true)"
 check "stock counted" 200 "$(code -b "$A" -X PUT -H "$ORIGIN" -H "$JSON" -d '{"quantityOnHand":5,"reason":"Smoke test"}' "$BASE/api/inventory/$PRODUCT_ID")"
 check "product edit page" 200 "$(code -b "$A" "$BASE/admin/products/$PRODUCT_ID")"
 check "stock page" 200 "$(code -b "$A" "$BASE/admin/inventory/$PRODUCT_ID")"
+# Search: the new product is found by its SKU, and inventory's stock.level-changed marks it in stock
+SEARCH="$BASE/api/products?keyword=smoke-$SUFFIX"
+check "search finds the product by SKU" "$PRODUCT_ID" "$(curl -s "$SEARCH" | json data.content.0.id)"
+check "search: product in stock" true "$(for i in $(seq 1 20); do
+  [ "$(curl -s "$SEARCH" | json data.content.0.inStock)" = true ] && break; sleep 0.5; done
+  curl -s "$SEARCH" | json data.content.0.inStock)"
+# "тестовые" typed on the Latin keyboard layout
+check "suggest corrects the keyboard layout" "тестовые" "$(curl -s "$BASE/api/products/suggest?q=ntcnjdst" | json data.correctedQuery)"
+check "search statistics" 200 "$(code -b "$A" "$BASE/api/search/admin/stats")"
 
 echo "== customer"
 C=$DIR/customer.jar

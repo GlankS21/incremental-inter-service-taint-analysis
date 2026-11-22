@@ -15,3 +15,9 @@ export function safeNext(value: string | null | undefined, fallback = "/"): stri
   }
   return value;
 }
+
+/** Login page that brings the user back to `current` (path and query) once signed in. */
+export function loginUrl(current: string): string {
+  const next = safeNext(current);
+  return next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`;
+}

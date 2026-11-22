@@ -26,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -47,19 +48,23 @@ class AddressServiceImplTest {
     void setUp() {
         service = new AddressServiceImpl(addressRepository, userProfileRepository, userProfileService,
                 new AddressMapperImpl());
+        lenient().when(userProfileRepository.findForUpdateById(userId))
+                .thenReturn(Optional.of(UserProfile.builder().id(userId).build()));
     }
 
     @Test
     void createAddress_firstAddressBecomesDefault() {
         when(addressRepository.countByUserId(userId)).thenReturn(0L);
-        when(userProfileRepository.getReferenceById(userId)).thenReturn(UserProfile.builder().id(userId).build());
         when(addressRepository.saveAndFlush(any(Address.class))).thenAnswer(inv -> inv.getArgument(0));
 
         AddressResponse response = service.createAddress(userId, "jane@example.com", request(false));
 
         assertThat(response.defaultAddress()).isTrue();
         assertThat(response.city()).isEqualTo("Москва");
-        verify(userProfileService).getOrCreateProfile(userId, "jane@example.com");
+        InOrder order = inOrder(userProfileService, userProfileRepository, addressRepository);
+        order.verify(userProfileService).getOrCreateProfile(userId, "jane@example.com");
+        order.verify(userProfileRepository).findForUpdateById(userId);
+        order.verify(addressRepository).countByUserId(userId);
         verify(addressRepository, never()).clearDefaultForUser(any());
     }
 
@@ -102,7 +107,6 @@ class AddressServiceImplTest {
     @Test
     void createAddress_withoutCountryIsInRussia() {
         when(addressRepository.countByUserId(userId)).thenReturn(0L);
-        when(userProfileRepository.getReferenceById(userId)).thenReturn(UserProfile.builder().id(userId).build());
         when(addressRepository.saveAndFlush(any(Address.class))).thenAnswer(inv -> inv.getArgument(0));
         AddressRequest request = new AddressRequest("Иван Петров", "+79161234567", "ул. Тверская, д. 7", null,
                 null, null, "Москва", "125009", null, null);

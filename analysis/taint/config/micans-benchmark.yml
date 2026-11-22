@@ -1,0 +1,7 @@
+# Taint config of the Micans benchmark runs (analysis/experiments/micans_benchmark.py --per-service-method):
+# the sink the benchmark seeds into its "-taint" jars, as Micans' MsTaintConfigProvider declares it.
+# Sources are Micans' own (String fields of web-endpoint DTOs) plus the channel ends added by
+# vkr.plugin.ListenerEntryPoints and vkr.plugin.StringParamSources; outgoing channel ends are
+# reported by vkr.plugin.ChannelArgSink.
+sinks:
+  - { method: "<taint.SourceSink: void sink(java.lang.String)>", index: 0 }

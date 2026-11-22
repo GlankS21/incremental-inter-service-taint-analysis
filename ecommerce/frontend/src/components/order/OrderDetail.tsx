@@ -1,6 +1,6 @@
 import { useTranslations } from "next-intl";
 import { formatAddress } from "@/components/address/AddressFields";
-import { StatusBadge, Thumb } from "@/components/ui";
+import { Badge, StatusBadge, Thumb } from "@/components/ui";
 import {
   formatDateTime,
   formatMoney,
@@ -12,10 +12,18 @@ import {
 import { isInProgress } from "@/lib/orders";
 import { formatPhone } from "@/lib/phone";
 import { isKnownFailure } from "@/lib/payment-failure";
-import type { Order, Payment } from "@/lib/types";
+import type { ReactNode } from "react";
+import type { Order, OrderItem, Payment } from "@/lib/types";
+
+interface Props {
+  order: Order;
+  payment: Payment | null;
+  /** Shown under each product (the customer's review actions of a delivered order). */
+  itemExtra?: (item: OrderItem) => ReactNode;
+}
 
 /** Order content shared by the customer and admin pages. */
-export function OrderDetail({ order, payment }: { order: Order; payment: Payment | null }) {
+export function OrderDetail({ order, payment, itemExtra }: Props) {
   const t = useTranslations("order");
   const tCommon = useTranslations("common");
   const tOrderStatus = useTranslations("orderStatus");
@@ -37,6 +45,7 @@ export function OrderDetail({ order, payment }: { order: Order; payment: Payment
                   <p className="text-sm text-slate-500">
                     {formatMoney(item.unitPrice, order.currency)} × {item.quantity}
                   </p>
+                  {itemExtra?.(item)}
                 </div>
                 <p className="font-medium whitespace-nowrap">{formatMoney(item.lineTotal, order.currency)}</p>
               </li>
@@ -114,6 +123,8 @@ function PaymentSummary({ order, payment }: { order: Order; payment: Payment | n
   const paymentStatus = labelled(PAYMENT_STATUS_TONE, (value) => tPaymentStatus(value));
   const transactionStatus = labelled(TRANSACTION_STATUS_TONE, (value) => tTransactionStatus(value));
   const failure = (code: string | null) => (isKnownFailure(code) ? tFailure(code) : code);
+  // Cash on delivery is accepted when the order is confirmed: the courier collects the money later
+  const cashOnDelivery = payment?.provider === "COD";
   // Charges are numbered as attempts: "Оплата · Попытка 2"
   const attempts = new Map(
     (payment?.transactions ?? [])
@@ -133,10 +144,14 @@ function PaymentSummary({ order, payment }: { order: Order; payment: Payment | n
             <div className="flex items-center justify-between">
               <dt className="text-slate-500">{t("paymentStatus")}</dt>
               <dd>
-                <StatusBadge value={payment.status} labels={paymentStatus} />
+                {cashOnDelivery && payment.status === "SUCCEEDED" ? (
+                  <Badge tone="info">{t("codAccepted")}</Badge>
+                ) : (
+                  <StatusBadge value={payment.status} labels={paymentStatus} />
+                )}
               </dd>
             </div>
-            {payment.transactionId && (
+            {payment.transactionId && !cashOnDelivery && (
               <div className="flex justify-between gap-2">
                 <dt className="text-slate-500">{t("transactionId")}</dt>
                 <dd className="font-mono text-xs break-all">{payment.transactionId}</dd>
@@ -144,7 +159,7 @@ function PaymentSummary({ order, payment }: { order: Order; payment: Payment | n
             )}
             {payment.paidAt && (
               <div className="flex justify-between gap-2">
-                <dt className="text-slate-500">{t("paidAt")}</dt>
+                <dt className="text-slate-500">{t(cashOnDelivery ? "confirmedAt" : "paidAt")}</dt>
                 <dd>{formatDateTime(payment.paidAt)}</dd>
               </div>
             )}

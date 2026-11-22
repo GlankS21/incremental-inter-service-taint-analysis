@@ -1,0 +1,20 @@
+# vkr-taint configuration of train-ticket (FudanSELab), built by build_public.sh into VKR_PUBLIC_BUILD.
+version: 1
+project:
+  root: ${VKR_PUBLIC_BUILD:-${VKR_EXP}/build}/train-ticket
+  gateway-config: auto
+services: auto
+shared: [ts-common]   # auto also picks the unbuilt modules under old-docs/
+taint:
+  sinks: [cwe-89, cwe-117]
+  sources: auto
+  discovery: annotations
+analysis:
+  context: 1-call
+  heap: ${VKR_HEAP:-24g}
+  world-cache: ${VKR_WORLD_CACHE:-off}
+toolchain:
+  java-home: ${JAVA_HOME}
+  micans-jar: ${VKR_MICANS_JAR:-${MICANS_JAR}}
+gate:
+  fail-on: none

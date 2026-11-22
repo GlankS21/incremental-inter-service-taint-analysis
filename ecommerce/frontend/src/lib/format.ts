@@ -28,6 +28,19 @@ export function formatMoney(amount: number | null | undefined, currency: string 
   }).format(amount);
 }
 
+/** 0.1234 → "12,3 %"; null → "—". */
+export function formatPercent(ratio: number | null | undefined): string {
+  if (ratio === null || ratio === undefined) {
+    return "—";
+  }
+  return new Intl.NumberFormat(INTL_LOCALE, { style: "percent", maximumFractionDigits: 1 }).format(ratio);
+}
+
+/** 12345.678 → "12 345,7" (at most one decimal). */
+export function formatDecimal(value: number): string {
+  return new Intl.NumberFormat(INTL_LOCALE, { maximumFractionDigits: 1 }).format(value);
+}
+
 // Explicit fields give dd.MM.yyyy whatever the default style of the locale
 const DATE_FIELDS = { day: "2-digit", month: "2-digit", year: "numeric" } as const;
 
@@ -123,12 +136,16 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "ORDER_CONFIRMED",
   "ORDER_CANCELLED",
   "PASSWORD_RESET",
+  "REVIEW_REQUEST",
+  "REVIEW_REMINDER",
 ];
 
 export const NOTIFICATION_STATUS_TONE: Record<NotificationStatus, Tone> = {
   PENDING: "neutral",
+  SENDING: "neutral",
   SENT: "success",
   FAILED: "danger",
+  EXPIRED: "warning",
 };
 
 export const MOVEMENT_TYPES: MovementType[] = ["ADJUSTMENT", "RESERVATION", "RELEASE", "SALE", "RETURN"];

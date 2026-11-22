@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { CancelOrder, OrderAutoRefresh } from "@/components/order/OrderActions";
 import { OrderDetail } from "@/components/order/OrderDetail";
+import { OrderItemReview, OrderReviews } from "@/components/order/OrderItemReviews";
 import { Alert, ButtonLink, StatusBadge } from "@/components/ui";
 import { formatDateTime, labelled, ORDER_STATUS_TONE } from "@/lib/format";
 import { awaitsOnlinePayment, isCancellable, isInProgress, isSettling } from "@/lib/orders";
@@ -72,7 +73,18 @@ export default async function OrderPage({ params, searchParams }: Props) {
         )}
       </div>
 
-      <OrderDetail order={order} payment={payment} />
+      {order.status === "DELIVERED" ? (
+        // Each received product can be rated right here
+        <OrderReviews productIds={order.items.map((item) => item.productId)}>
+          <OrderDetail
+            order={order}
+            payment={payment}
+            itemExtra={(item) => <OrderItemReview productId={item.productId} productName={item.productName} />}
+          />
+        </OrderReviews>
+      ) : (
+        <OrderDetail order={order} payment={payment} />
+      )}
     </div>
   );
 }

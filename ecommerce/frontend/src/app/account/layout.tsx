@@ -1,6 +1,7 @@
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 import { NavTabs } from "@/components/NavTabs";
+import { PendingReviewsBadge } from "@/components/review/PendingReviewsBadge";
 
 export default function AccountLayout({ children }: { children: ReactNode }) {
   const t = useTranslations("account");
@@ -8,6 +9,7 @@ export default function AccountLayout({ children }: { children: ReactNode }) {
     { href: "/account", label: t("tabProfile"), exact: true },
     { href: "/account/addresses", label: t("tabAddresses") },
     { href: "/orders", label: t("tabOrders") },
+    { href: "/account/reviews", label: t("tabReviews"), badge: <PendingReviewsBadge /> },
     { href: "/account/notifications", label: t("tabNotifications") },
     { href: "/account/password", label: t("tabPassword") },
   ];
