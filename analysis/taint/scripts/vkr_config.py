@@ -5,7 +5,8 @@
     services:  auto            # or a list of names / {name, module, jar, classes}
     shared:    auto            # or a list of names / {name, module, artifact}
     taint:
-      sinks: [cwe-89, cwe-117] # built-in catalogues (gen_taint_config.CATALOGUES) or Tai-e yml files
+      sinks: [cwe-89, cwe-117] # built-in catalogues (gen_taint_config.CATALOGUES: also cwe-79,
+                               # cwe-918, cwe-1336) or Tai-e yml files
       sources: auto            # externally reachable endpoints + listeners of the channel model
       discovery: annotations   # request bodies, @Entity classes and channel payloads, not package names
       packages: { dto: [..], entity: [..], event: [..] }   # optional override of the discovery
@@ -32,7 +33,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import vkr_yaml  # noqa: E402
 
 CONFIG_NAME = 'vkr-taint.yml'
-KNOWN_SINKS = ('cwe-89', 'cwe-117')
+KNOWN_SINKS = ('cwe-89', 'cwe-117', 'cwe-79', 'cwe-918', 'cwe-1336')
+DEFAULT_SINKS = ('cwe-89', 'cwe-117')  # the catalogues of the thesis measurements
 SKIP_DIRS = {'target', 'build', 'node_modules', 'out', 'bin', '.git', '.idea', '.mvn', '.gradle', 'src'}
 INFRA_MARKERS = ('@EnableConfigServer', '@EnableEurekaServer')
 GATEWAY_DEP = 'spring-cloud-starter-gateway'
@@ -274,7 +276,7 @@ def load(path=None, env=None, require=()):
             errors.append(f'services: no @SpringBootApplication module found under {root}')
 
     taint = _section(raw, 'taint', errors)
-    sinks = taint.get('sinks', list(KNOWN_SINKS))
+    sinks = taint.get('sinks', list(DEFAULT_SINKS))
     if isinstance(sinks, str):
         sinks = [sinks]
     resolved_sinks = []

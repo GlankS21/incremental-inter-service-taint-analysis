@@ -24,9 +24,18 @@ RULES = {
                'possibly through other services.'),
     'CWE-117': ('LogInjection', 'Log injection',
                 'A request parameter reaches a log statement unneutralized, possibly through other services.'),
+    'CWE-79': ('CrossSiteScripting', 'Cross-site scripting',
+               'A request parameter, or a value stored from one, is returned as the response body without '
+               'HTML encoding, possibly through other services.'),
+    'CWE-918': ('ServerSideRequestForgery', 'Server-side request forgery',
+                'A request parameter decides the URL the service opens, possibly through other services.'),
+    'CWE-1336': ('TemplateInjection', 'Template injection',
+                 'A request parameter is compiled as a template (FreeMarker, Thymeleaf, Velocity), possibly '
+                 'through other services.'),
 }
-LEVEL = {'CWE-89': 'error', 'CWE-117': 'warning'}
-SEVERITY = {'CWE-89': '8.8', 'CWE-117': '5.3'}  # GitHub orders code scanning alerts by security-severity
+LEVEL = {'CWE-89': 'error', 'CWE-117': 'warning', 'CWE-79': 'error', 'CWE-918': 'error', 'CWE-1336': 'error'}
+# GitHub orders code scanning alerts by security-severity
+SEVERITY = {'CWE-89': '8.8', 'CWE-117': '5.3', 'CWE-79': '6.1', 'CWE-918': '8.6', 'CWE-1336': '9.8'}
 SINK = re.compile(r'\s+(CWE-\d+) @ ([\w$.]+)#([\w$<>]+):(\d+)$')
 EDGE = re.compile(r'\s+--(\w+) (.*?)-->\s+')
 NODE = re.compile(r'^(\w+):([^:]+):(.*?)(?: <([^>]*)>)?$')
