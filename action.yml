@@ -1,8 +1,5 @@
 name: DeltaTaint
-description: >-
-  Incremental inter-service taint analysis of a Spring Cloud (Maven) repository: only services whose
-  analysis inputs changed are re-analysed with Micans, the per-service summaries are composed along the
-  HTTP, AMQP and shared-table channels, and the chains to a sink, grouped into findings, are reported as SARIF.
+description: Incremental taint analysis across Spring Cloud microservices; re-analyses only changed services, reports SARIF.
 author: GlankS21
 branding:
   icon: shield
