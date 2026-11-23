@@ -47,6 +47,13 @@ FRAMEWORK_TYPES = {
 # a call <receiver whose type ends with OutboxService>.enqueue(exchange, routingKey, payload, ...)
 OUTBOX_SIGNATURES = [('OutboxService', 'enqueue', 2)]
 ENTITY_ANNOTATIONS = (b'Ljakarta/persistence/Entity;', b'Ljavax/persistence/Entity;')
+# Kotlin request handlers: channel-extractor parses Java sources only, so a controller written in
+# Kotlin has no endpoint in the channel model; its handlers are read from the bytecode instead
+KOTLIN_METADATA = b'Lkotlin/Metadata;'
+WEB_ANNOTATION = 'org.springframework.web.bind.annotation.'
+MAPPING_ANNOTATIONS = {WEB_ANNOTATION + a for a in (
+    'RequestMapping', 'GetMapping', 'PostMapping', 'PutMapping', 'PatchMapping', 'DeleteMapping')}
+CONTROLLER_ANNOTATIONS = {WEB_ANNOTATION + 'RestController', 'org.springframework.stereotype.Controller'}
 
 CATALOGUES = {
     'cwe-89': [
@@ -280,6 +287,79 @@ def parse_javap(text):
     return result
 
 
+_ANNOTATION = re.compile(r'^([a-z][\w$]*(?:\.[\w$]+)*\.[A-Z][\w$]*)(?:\(|$)')
+_SECTION = re.compile(r'^[A-Z]\w*:$')
+
+
+def parse_handlers(text):
+    """javap -p -v output -> [(class, (name, params, return, static))] of the methods carrying a request
+    mapping annotation, in classes annotated as controllers."""
+    out, cur, method, mode, class_ann, handlers = [], None, None, None, set(), []
+
+    def close():
+        if cur and class_ann & CONTROLLER_ANNOTATIONS:
+            out.extend((cur, m) for m in handlers)
+
+    pending = None
+    for line in text.splitlines():
+        if not line.startswith(' '):
+            m = re.search(r'\b(?:class|interface)\s+([\w.$]+)', line)
+            if m and not line.startswith('Compiled from'):
+                close()
+                cur, method, mode, class_ann, handlers = m.group(1), None, None, set(), []
+            elif line.startswith('}'):
+                method, mode = None, None
+            elif line.strip() == 'RuntimeVisibleAnnotations:':
+                mode = 'class'
+            elif _SECTION.match(line.strip()):
+                mode = None
+            continue
+        st = line.strip()
+        if line.startswith('  ') and not line.startswith('   ') and '(' in st and st.endswith(';'):
+            pending, method, mode = st, None, None
+            continue
+        if st.startswith('descriptor:') and pending is not None:
+            desc = st.split(':', 1)[1].strip()
+            head = pending.split('(', 1)[0].split()
+            if '(' in desc and head:
+                params, ret = parse_descriptor(desc)
+                method = (head[-1], params, ret, 'static' in head[:-1])
+            pending = None
+            continue
+        if st == 'RuntimeVisibleAnnotations:':
+            mode = 'method' if method else 'class'
+            continue
+        if _SECTION.match(st):
+            mode = None
+            continue
+        a = _ANNOTATION.match(st)
+        if a and mode == 'class' and method is None:
+            class_ann.add(a.group(1))
+        elif a and mode == 'method' and a.group(1) in MAPPING_ANNOTATIONS and method not in handlers:
+            handlers.append(method)
+    close()
+    return out
+
+
+def kotlin_handlers(svc, known):
+    """Request handlers of the service's Kotlin controllers that are not in the channel model."""
+    classes = []
+    for c in svc.app_classes:
+        if c in known:
+            continue
+        with open(os.path.join(svc.app, *c.split('.')) + '.class', 'rb') as f:
+            data = f.read()
+        if KOTLIN_METADATA in data and b'org/springframework/web/bind/annotation/' in data:
+            classes.append(c)
+    exe = os.path.join(svc.java_home, 'bin', 'javap')
+    out = []
+    for i in range(0, len(classes), 150):
+        r = subprocess.run([exe, '-p', '-v', '-cp', os.pathsep.join(svc.classpath), *classes[i:i + 150]],
+                           capture_output=True, text=True, encoding='utf-8', errors='replace')
+        out += parse_handlers(r.stdout)
+    return out
+
+
 def class_files(root):
     """Class names under a classes directory (nested classes included)."""
     out = []
@@ -444,6 +524,22 @@ def generate(cfg, model, module, java_home):
             sources.append({'kind': 'param', 'method': tai_sig(h['className'], m), 'index': i})
             if (t in svc.app_classes or t in svc.shared_classes) and not t.endswith('[]'):
                 dto_classes.add(t)
+    known = {e['handler']['className'] for e in model.get('endpoints', []) if e['service'] == name}
+    kotlin = kotlin_handlers(svc, known)
+    if kotlin and gateway:
+        notes.append(f'{len(kotlin)} Kotlin request handler(s) not in the channel model: gateway exposure '
+                     f'unknown, not sources')
+    elif kotlin:
+        notes.append(f'{len(kotlin)} Kotlin request handler(s) read from the bytecode (not in the channel model)')
+        for cls, m in kotlin:
+            for i, t in enumerate(m[1]):
+                if t in PRIMITIVES or t in FRAMEWORK_TYPES or is_enum(t) or t.startswith('kotlin.coroutines.'):
+                    continue
+                entry = {'kind': 'param', 'method': tai_sig(cls, m), 'index': i}
+                if entry not in sources:
+                    sources.append(entry)
+                if (t in svc.app_classes or t in svc.shared_classes) and not t.endswith('[]'):
+                    dto_classes.add(t)
     listener_sources = []
     payload_types = set()
     for l in sorted(listeners, key=lambda l: (l['handler']['className'], l['handler']['line'])):
