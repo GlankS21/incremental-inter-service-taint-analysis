@@ -29,6 +29,7 @@ public final class MicansTaintMain {
      * benchmark runs keep Micans' modelling and add only the channel plugins).
      */
     private static final String DEFAULT_PLUGINS = String.join(",",
+            "vkr.plugin.ConstantBranches",
             "vkr.plugin.SpringDataModel",
             "vkr.plugin.ContainerTaint",
             "vkr.plugin.StringConcatTaint",
