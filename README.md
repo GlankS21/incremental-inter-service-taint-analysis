@@ -1,4 +1,4 @@
-# vkr-taint
+# DeltaTaint
 
 A GitHub Action that runs incremental inter-service taint analysis on Java (Spring Cloud, Maven)
 microservice systems. It reports chains from an externally reachable endpoint to a sink, including
