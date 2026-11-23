@@ -243,6 +243,11 @@ decoding text that the Spring services do not need.
     mall-swarm ran with 12 GB.
 - **Precision:** inherits Micans (1-call context sensitivity).
   - A chain is a candidate, not a proof.
+  - The points-to analysis is flow-insensitive. Code behind an `if` or `switch` whose condition
+    is constant inside the method (`int num = 86; if ((7 * 42) - num > 200)`, `"ABC".charAt(1)`)
+    is dropped before the analysis (`vkr.plugin.ConstantBranches`). Other value-dependent code is
+    not: a list element taken at another index or a map value read under another key still
+    carries the taint.
   - On the testbed's seeded set, the sanitised negatives are not reported.
   - On public systems, false positives were found and fixed per case.
 
