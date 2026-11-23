@@ -1,4 +1,4 @@
-name: vkr-taint
+name: DeltaTaint
 description: >-
   Incremental inter-service taint analysis of a Spring Cloud (Maven) repository: only services whose
   analysis inputs changed are re-analysed with Micans, the per-service summaries are composed along the
