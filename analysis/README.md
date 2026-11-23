@@ -210,7 +210,10 @@ is in the report.
   - covered: Spring MVC endpoints, OpenFeign, `RestTemplate`, RabbitMQ (including transactional
     outbox and dead-letter routing), and tables shared by services (entity fields);
   - not covered: gRPC, Kafka, `WebClient`, GraphQL.
-- **Sinks:** only the two catalogues above are built in. Others can be given as Tai-e taint yml files.
+- **Kotlin:** the channel model is built from Java sources. Request handlers of Kotlin controllers
+  are read from the bytecode and become sources when the system has no gateway, but they have no
+  endpoint id (a finding names `Class#method`), and Kotlin Feign clients and listeners are not seen.
+- **Sinks:** only the catalogues above are built in. Others can be given as Tai-e taint yml files.
 - **Cost:**
   - a commit that changes a shared module or a library version re-analyses every service that
     packages it, and that run is about as long as a full one;
