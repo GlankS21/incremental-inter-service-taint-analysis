@@ -54,7 +54,7 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21', cache: maven }
       - run: ./mvnw -B -DskipTests package
-      - uses: GlankS21/web-project@<ref>
+      - uses: GlankS21/web-project@v1
         with:
           path: .                 # the Maven multi-module root
 ```
@@ -151,7 +151,8 @@ Sink catalogues:
 - **`cwe-89`**: JPA `EntityManager.createQuery`/`createNativeQuery` (javax and jakarta),
   `JdbcTemplate` `query*`/`update`/`execute`/`batchUpdate`, plain JDBC statement text
   (`Statement.execute*`/`addBatch`, `Connection.prepare*`), and MyBatis mapper parameters used with `${}`.
-- **`cwe-117`**: the arguments of SLF4J `Logger` calls. Log4j and JUL are not in the catalogue.
+- **`cwe-117`**: the message of SLF4J `Logger` calls (also when it is built by concatenation, e.g.
+  `log.info("code " + code)`) and their `{}` arguments. Log4j and JUL are not in the catalogue.
 - **`cwe-79`**: the text body of a request handler: the `String` a `@ResponseBody`/`@RestController`
   method returns, or the `String` passed to `ResponseEntity.ok`/`body`. It is checked by the plugin
   `vkr.plugin.ResponseBodySink`, because Spring writes the body outside the analysed code. Object
