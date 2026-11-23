@@ -1,6 +1,6 @@
 # DeltaTaint
 
-A GitHub Action that runs incremental inter-service taint analysis on Java (Spring Cloud, Maven)
+DeltaTaint is a GitHub Action that runs incremental inter-service taint analysis on Java (Spring Cloud, Maven)
 microservice systems. It reports chains from an externally reachable endpoint to a sink, including
 chains whose data passes through other services over HTTP (Feign, `RestTemplate`), RabbitMQ or a
 shared table. On each commit it re-analyses only the services whose analysis inputs changed.
