@@ -70,14 +70,17 @@ CATALOGUES = {
         ]),
     ],
     'cwe-117': [
-        ('log injection (CWE-117)', [
+        ('log injection (CWE-117): the message, also when built by concatenation, and the arguments', [
+            {'method': '<org.slf4j.Logger: void *(java.lang.String)>', 'index': 0},
+            {'method': '<org.slf4j.Logger: void *(java.lang.String,java.lang.Object)>', 'index': 0},
+            {'method': '<org.slf4j.Logger: void *(java.lang.String,java.lang.Object,java.lang.Object)>', 'index': 0},
             {'method': '<org.slf4j.Logger: void *(java.lang.String,java.lang.Object)>', 'index': 1},
             {'method': '<org.slf4j.Logger: void *(java.lang.String,java.lang.Object,java.lang.Object)>', 'index': 1},
             {'method': '<org.slf4j.Logger: void *(java.lang.String,java.lang.Object,java.lang.Object)>', 'index': 2},
         ]),
         ('varargs: wildcard method names cannot be combined with array types in Tai-e patterns', [
-            {'method': f'<org.slf4j.Logger: void {m}(java.lang.String,java.lang.Object[])>', 'index': '1[*]'}
-            for m in ('info', 'warn', 'error', 'debug')
+            {'method': f'<org.slf4j.Logger: void {m}(java.lang.String,java.lang.Object[])>', 'index': i}
+            for m in ('info', 'warn', 'error', 'debug') for i in (0, '1[*]')
         ]),
     ],
     'cwe-918': [
