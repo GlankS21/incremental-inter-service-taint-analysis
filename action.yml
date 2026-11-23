@@ -4,6 +4,9 @@ description: >-
   analysis inputs changed are re-analysed with Micans, the per-service summaries are composed along the
   HTTP, AMQP and shared-table channels, and the chains to a sink, grouped into findings, are reported as SARIF.
 author: GlankS21
+branding:
+  icon: shield
+  color: purple
 
 inputs:
   path:
