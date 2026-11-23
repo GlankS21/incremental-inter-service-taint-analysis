@@ -5,13 +5,16 @@ vkr_config.py discovers them) are extracted to <workdir>/common (analysed as app
 stay as jars and are listed in <workdir>/libjars.txt: writing their ~50k classes out as files took
 ~7 min per service on Windows, reading them from the jars takes seconds. A library jar that has
 classes newer than Micans' ASM 9.4 can read is extracted to <workdir>/lib instead.
+The libraries are those of a Spring Boot jar (BOOT-INF/lib) or of a war (WEB-INF/lib). A servlet
+application whose libraries lack the Servlet API (scope provided: the container supplies it) gets the
+analysis-only stubs (env VKR_SERVLET_STUBS: <dir with javax.jar and jakarta.jar>, built by prepare.sh).
 usage: prep_micans.py <workdir>"""
 import sys, os, zipfile, struct
 
 # on Windows the \\?\ prefix lifts the 260-char path limit
 PFX = '\\\\?\\' if os.name == 'nt' else ''
 W = PFX + os.path.abspath(sys.argv[1])
-libdir = os.path.join(W, 'bootjar', 'BOOT-INF', 'lib')
+libdirs = [os.path.join(W, 'bootjar', d, 'lib') for d in ('BOOT-INF', 'WEB-INF')]
 common = os.path.join(W, 'common')
 lib = os.path.join(W, 'lib')
 os.makedirs(common, exist_ok=True)
@@ -36,10 +39,11 @@ def too_new(data):
 
 
 jars = []
-for jar in sorted(os.listdir(libdir)):
-    path = os.path.join(libdir, jar)
+found = set()  # class entries of the library jars, for the Servlet API check
+for jar, path in sorted((j, os.path.join(d, j)) for d in libdirs if os.path.isdir(d) for j in os.listdir(d)):
     with zipfile.ZipFile(path) as z:
         names = classes(z)
+        found.update(n for n in names if n.endswith('/http/HttpServlet.class'))
         if not shared(jar) and not any(too_new(z.open(n).read(8)) for n in names):
             jars.append(path[len(PFX):])  # without \\?\: the list is read by Java
             continue
@@ -51,6 +55,26 @@ for jar in sorted(os.listdir(libdir)):
             os.makedirs(os.path.dirname(out), exist_ok=True)
             with open(out, 'wb') as f:
                 f.write(z.read(n))
+
+
+def references(prefix):
+    """True when an application class names the type (constant pool entry), e.g. its superclass."""
+    needle = prefix.encode()
+    for root, _, files in os.walk(os.path.join(W, 'app')):
+        for fn in files:
+            if fn.endswith('.class'):
+                with open(os.path.join(root, fn), 'rb') as f:
+                    if needle in f.read():
+                        return True
+    return False
+
+
+stubs = os.environ.get('VKR_SERVLET_STUBS')
+for ns in ('javax', 'jakarta'):
+    api = f'{ns}/servlet/http/HttpServlet'
+    if stubs and api + '.class' not in found and references(api):
+        jars.append(os.path.join(stubs, ns + '.jar'))
+        print(f'{ns}.servlet API not packaged (scope provided): analysis stubs added')
 with open(os.path.join(W, 'libjars.txt'), 'w', encoding='utf-8') as f:
     f.write(''.join(j + '\n' for j in jars))
 

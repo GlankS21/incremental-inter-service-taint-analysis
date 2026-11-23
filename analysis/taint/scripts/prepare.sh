@@ -2,7 +2,7 @@
 # Builds the class layout of work/ for one service: the JRE model (once) and the service's extracted
 # application and library classes. The taint configs of the workdir are generated afterwards by
 # vkr_prepare.py (which calls this script with the paths vkr_config.py resolved from vkr-taint.yml).
-# usage: prepare.sh <service> <classes dir> <spring boot jar>
+# usage: prepare.sh <service> <classes dir> <spring boot jar or war>
 #        prepare.sh --jre-only
 # env: JAVA_HOME (required: JDK whose modules form the JRE model), VKR_SHARED_JARS (comma-separated
 #      artifact names of the project's shared modules, extracted as application code),
@@ -19,7 +19,7 @@ if [ "$1" != "--jre-only" ]; then
     CLASSES=$2
     JAR=$3
     [ -n "$svc" ] && [ -d "$CLASSES" ] && [ -f "$JAR" ] || {
-        echo "usage: prepare.sh <service> <classes dir> <spring boot jar> (got '$svc' '$CLASSES' '$JAR')" >&2
+        echo "usage: prepare.sh <service> <classes dir> <spring boot jar or war> (got '$svc' '$CLASSES' '$JAR')" >&2
         exit 2
     }
 fi
@@ -50,12 +50,30 @@ EOF
 fi
 [ "$1" = "--jre-only" ] && exit 0
 
+# Servlet API stubs (javax and jakarta) for a war whose container provides the API (scope provided)
+S="$K/servlet-stubs"
+if [ ! -f "$S/jakarta.jar" ]; then
+    rm -rf "$S"
+    mkdir -p "$S/src" "$S/javax" "$S/jakarta"
+    cp -r "$T/servlet-stubs/javax" "$S/src/"
+    (cd "$S/src" && find javax -name '*.java' | while read -r f; do
+        mkdir -p "$(dirname "jakarta${f#javax}")"
+        sed 's/javax\.servlet/jakarta.servlet/g' "$f" > "jakarta${f#javax}"
+    done)
+    for ns in javax jakarta; do
+        (cd "$S/src" && "$JAVA_HOME/bin/javac" --release 8 -nowarn -d "$(wp "$S/$ns")" $(find $ns -name '*.java'))
+        "$JAVA_HOME/bin/jar" cf "$(wp "$S/$ns.jar")" -C "$(wp "$S/$ns")" .
+    done
+fi
+export VKR_SERVLET_STUBS="$S"
+
 W="$K/$svc"
 if [ ! -d "$W/app" ]; then
     rm -rf "$W"
     mkdir -p "$W/bootjar"
     cp -r "$CLASSES" "$W/app"
-    (cd "$W/bootjar" && unzip -q "$JAR" 'BOOT-INF/lib/*')
+    # the library jars of a Spring Boot jar or of a war; unzip exits 11 when one pattern matches nothing
+    (cd "$W/bootjar" && { unzip -q "$JAR" 'BOOT-INF/lib/*' 'WEB-INF/lib/*' || [ $? -eq 11 ]; })
     "$PY" -I "$T/scripts/prep_micans.py" "$W"
 fi
 echo "$svc: $W"

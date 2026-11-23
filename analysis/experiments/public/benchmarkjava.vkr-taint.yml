@@ -1,0 +1,21 @@
+# vkr-taint configuration of OWASP BenchmarkJava (a servlet war), built by build_public.sh into
+# VKR_PUBLIC_BUILD with maven:3.9.9-eclipse-temurin-17 (its .mvn/jvm.config needs JDK 9+).
+version: 1
+project:
+  root: ${VKR_PUBLIC_BUILD:-${VKR_EXP}/build}/BenchmarkJava
+  gateway-config: auto
+services: auto
+shared: auto
+taint:
+  sinks: [cwe-89, cwe-79, cwe-78, cwe-22]
+  sources: auto
+  discovery: annotations
+analysis:
+  context: 1-call
+  heap: ${VKR_HEAP:-24g}
+  world-cache: ${VKR_WORLD_CACHE:-off}
+toolchain:
+  java-home: ${JAVA_HOME}
+  micans-jar: ${VKR_MICANS_JAR:-${MICANS_JAR}}
+gate:
+  fail-on: none

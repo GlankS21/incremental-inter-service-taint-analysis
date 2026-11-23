@@ -6,7 +6,7 @@
     shared:    auto            # or a list of names / {name, module, artifact}
     taint:
       sinks: [cwe-89, cwe-117] # built-in catalogues (gen_taint_config.CATALOGUES: also cwe-79,
-                               # cwe-918, cwe-1336) or Tai-e yml files
+                               # cwe-918, cwe-1336, cwe-78, cwe-22) or Tai-e yml files
       sources: auto            # externally reachable endpoints + listeners of the channel model
       discovery: annotations   # request bodies, @Entity classes and channel payloads, not package names
       packages: { dto: [..], entity: [..], event: [..] }   # optional override of the discovery
@@ -33,11 +33,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import vkr_yaml  # noqa: E402
 
 CONFIG_NAME = 'vkr-taint.yml'
-KNOWN_SINKS = ('cwe-89', 'cwe-117', 'cwe-79', 'cwe-918', 'cwe-1336')
+KNOWN_SINKS = ('cwe-89', 'cwe-117', 'cwe-79', 'cwe-918', 'cwe-1336', 'cwe-78', 'cwe-22')
 DEFAULT_SINKS = ('cwe-89', 'cwe-117')  # the catalogues of the thesis measurements
 SKIP_DIRS = {'target', 'build', 'node_modules', 'out', 'bin', '.git', '.idea', '.mvn', '.gradle', 'src'}
 INFRA_MARKERS = ('@EnableConfigServer', '@EnableEurekaServer')
 GATEWAY_DEP = 'spring-cloud-starter-gateway'
+# a servlet application (a war deployed to a servlet container): its HttpServlet subclasses are the entries
+SERVLET_MARKERS = ('extends HttpServlet', 'extends javax.servlet.http.HttpServlet',
+                   'extends jakarta.servlet.http.HttpServlet')
+# the library jars inside the deployable archive: a Spring Boot jar or a war
+LIB_PREFIXES = ('BOOT-INF/lib/', 'WEB-INF/lib/')
 
 
 class ConfigError(Exception):
@@ -154,11 +159,14 @@ def find_modules(root):
 
 
 def classify_module(module_dir):
-    """'service' (a @SpringBootApplication), 'infra' (config/discovery server, gateway) or 'shared'."""
+    """'service' (a @SpringBootApplication, or a war with HttpServlet subclasses), 'infra'
+    (config/discovery server, gateway) or 'shared'."""
     texts = [_read(p) for p in _java_sources(module_dir)]
     boot = any('@SpringBootApplication' in t for t in texts)
     if not boot:
-        return 'shared'
+        war = re.search(r'<packaging>\s*war\s*</packaging>', _read(_build_file(module_dir) or ''))
+        servlet = any(m in t for t in texts for m in SERVLET_MARKERS)
+        return 'service' if war and servlet else 'shared'
     if any(m in t for t in texts for m in INFRA_MARKERS) or GATEWAY_DEP in _read(_build_file(module_dir) or ''):
         return 'infra'
     return 'service'
@@ -173,16 +181,17 @@ def classes_dir(module_dir):
 
 
 def boot_jar(module_dir):
-    """The Spring Boot fat jar (has BOOT-INF/) in target/ or build/libs/."""
+    """The deployable archive in target/ or build/libs/: a Spring Boot fat jar (has BOOT-INF/) or a war
+    (has WEB-INF/)."""
     for d in (os.path.join(module_dir, 'target'), os.path.join(module_dir, 'build', 'libs')):
         if not os.path.isdir(d):
             continue
         for f in sorted(os.listdir(d)):
             p = os.path.join(d, f)
-            if f.endswith('.jar') and os.path.isfile(p):
+            if f.endswith(('.jar', '.war')) and os.path.isfile(p):
                 try:
                     with zipfile.ZipFile(p) as z:
-                        if any(n.startswith('BOOT-INF/') for n in z.namelist()[:200]):
+                        if any(n.startswith(('BOOT-INF/', 'WEB-INF/')) for n in z.namelist()[:200]):
                             return p
                 except zipfile.BadZipFile:
                     continue
@@ -344,7 +353,7 @@ def load(path=None, env=None, require=()):
                 errors.append(f'services.{m["name"]}: no built classes in {m["module"]} '
                               f'(target/classes or build/classes/java/main); the tool does not build, run the build first')
             if not m['jar']:
-                errors.append(f'services.{m["name"]}: no Spring Boot jar (with BOOT-INF/) in {m["module"]}/target '
+                errors.append(f'services.{m["name"]}: no Spring Boot jar (with BOOT-INF/) or war in {m["module"]}/target '
                               f'or build/libs; the tool does not build, run the build first')
         for m in cfg['shared']:
             if not m['classes']:
