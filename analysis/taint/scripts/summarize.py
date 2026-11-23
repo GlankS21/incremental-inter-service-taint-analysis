@@ -24,6 +24,9 @@ ANY_FLOW = re.compile(r'^(TaintFlow|StoreFlow|ResponseFlow)\{(.*?) -> (<.*)\}$')
 RESPONSE_SITE = re.compile(r'^<([^:]+): \S+ ([^(]+)\([^)]*\)>@L(-?\d+)$')
 # param source:  <Handler: R m(..)>/1
 PARAM_SRC = re.compile(r'^<([^:]+): \S+ ([^(]+)\(([^)]*)\)>/(\S+)$')
+# call source (a servlet application reads the request through getters, gen_taint_config.SERVLET_SOURCES):
+#   <Servlet: void doPost(..)>[i@Ln] $r = invokeinterface request.getParameter(..)/result
+CALL_SRC = re.compile(r'^<([^:]+): \S+ ([^(]+)\([^)]*\)>\[\d+@L-?\d+\] .*?\.(\w+)\([^)]*\)/result$')
 # field source:  <accessor()> [i@Ln] $r = %this.<Dto: T field>
 FIELD_SRC = re.compile(r'^<[^>]*> \[[^\]]*\] \S+ = \S+\.<([^:]+): \S+ (\w+)>$')
 SINK_CALL = re.compile(r'^<([^:]+): \S+ ([^(]+)\([^)]*\)>\[\d+@L(-?\d+)\] (.*)/(\S+)$')
@@ -43,12 +46,19 @@ ENTITY_CLASSES = set(DISCOVERY.get('entityClasses', []))
 OUTBOX_METHODS = {m for _, m in DISCOVERY.get('outboxSinks', [])} or {'enqueue'}
 REST_TEMPLATE_CALL = re.compile(r'\.(exchange|postForObject|postForEntity|getForObject|getForEntity|put|delete)\(')
 LOGGER_CALL = re.compile(r'\.(trace|debug|info|warn|error)\(')
-SQL_CALL = re.compile(r'\.(createNativeQuery|createQuery|query\w*|update|execute)\(')
+SQL_CALL = re.compile(r'\.(createNativeQuery|createQuery|query\w*|update|execute\w*|prepareStatement|prepareCall'
+                      r'|addBatch|batchUpdate)\(')
 # the other built-in catalogues (gen_taint_config.CATALOGUES cwe-918, cwe-1336)
 SSRF_CALL = re.compile(r'\.(openConnection|openStream|newBuilder|uri)\(')
 TEMPLATE_CALL = re.compile(r'\.(process|evaluate)\(')
+# servlet catalogues: PrintWriter output (CWE-79), OS commands (CWE-78), file paths (CWE-22)
+WRITER_CALL = re.compile(r'\.(print|println|write|format|printf|append)\(')
+COMMAND_CALL = re.compile(r'\.(exec|command)\(')
+PATH_CALL = re.compile(r'\.(get|of)\(')
 # constructors that are sinks of a catalogue: the call prints no class, the caller's bytecode tells
-CTOR_SINKS = {'freemarker/template/Template': 'CWE-1336'}
+CTOR_SINKS = {'freemarker/template/Template': 'CWE-1336', 'java/lang/ProcessBuilder': 'CWE-78',
+              **{f'java/io/{c}': 'CWE-22' for c in ('File', 'FileInputStream', 'FileOutputStream', 'FileReader',
+                                                     'FileWriter', 'RandomAccessFile')}}
 # MyBatis mapper methods whose XML statement splices a parameter with ${} (gen_taint_config.py)
 MYBATIS_METHODS = {m for _, m in DISCOVERY.get('mybatisSinks', [])}
 
@@ -204,6 +214,9 @@ def summary(service, log_path, model_path, out_path, app_dir, common_dir):
             src_cls, src_m, src_params, src_in = m.groups()
             argc = len([p for p in src_params.split(',') if p])
             entry_ids = [h['id'] for h in handlers_of(handler_index, src_cls, src_m, argc)] or [f'{src_cls}#{src_m}']
+        elif m := CALL_SRC.match(source):
+            src_cls, src_m, src_in = m.groups()
+            entry_ids = [f'{src_cls}#{src_m}']
         elif m := FIELD_SRC.match(source):
             dto_cls, field = m.groups()
             src_in = f'{dto_cls.rsplit(".", 1)[1]}.{field}'
@@ -265,6 +278,12 @@ def summary(service, log_path, model_path, out_path, app_dir, common_dir):
             exits = [{'kind': 'LOCAL', 'cwe': 'CWE-918', 'site': site}]
         elif TEMPLATE_CALL.search(call):
             exits = [{'kind': 'LOCAL', 'cwe': 'CWE-1336', 'site': site}]
+        elif WRITER_CALL.search(call):
+            exits = [{'kind': 'LOCAL', 'cwe': 'CWE-79', 'site': site}]
+        elif COMMAND_CALL.search(call):
+            exits = [{'kind': 'LOCAL', 'cwe': 'CWE-78', 'site': site}]
+        elif PATH_CALL.search(call):
+            exits = [{'kind': 'LOCAL', 'cwe': 'CWE-22', 'site': site}]
         else:
             exits = [{'kind': 'UNKNOWN', 'site': site, 'call': call}]
         add_exits(entries, entry_ids, src_in, exits)

@@ -94,7 +94,7 @@ def run_key(svc, base, discovery):
     h.tree('app', m['classes'], '.class')
     with zipfile.ZipFile(m['jar']) as boot:
         for e in sorted(boot.infolist(), key=lambda e: e.filename):
-            if not (e.filename.startswith('BOOT-INF/lib/') and e.filename.endswith('.jar')):
+            if not (e.filename.startswith(vkr_config.LIB_PREFIXES) and e.filename.endswith('.jar')):
                 continue
             if is_shared_jar(os.path.basename(e.filename)):
                 jar_classes(h, 'common', boot.read(e))  # built with the services: content only
@@ -109,6 +109,7 @@ def run_key(svc, base, discovery):
         h.file(s, os.path.join(T, 'scripts', s))
     h.tree('launcher', os.path.join(T, 'launcher', 'src'), '.java')
     h.tree('jdk-stubs', os.path.join(T, 'jdk-stubs'), '.java')
+    h.tree('servlet-stubs', os.path.join(T, 'servlet-stubs'), '.java')
     # entries, not bytes: a Micans jar rebuilt from the same source and patches (the Docker image after
     # an Actions cache eviction) differs in its zip timestamps only
     with zipfile.ZipFile(CFG['toolchain']['micans_jar']) as z:

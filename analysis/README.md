@@ -125,7 +125,7 @@ relative to the file.
 ```yaml
 version: 1
 project:
-  root: .                       # Maven multi-module root
+  root: .                       # Maven multi-module root (Spring Boot services, or a servlet war)
   gateway-config: auto          # Spring Cloud Gateway routes: which endpoints are exposed
 services: auto                  # or [order-service, ...] or {name, module, jar, classes}
 shared: auto                    # modules packaged into services (common-lib), analysed as application code
@@ -149,23 +149,31 @@ gate:
 Sink catalogues:
 
 - **`cwe-89`**: JPA `EntityManager.createQuery`/`createNativeQuery` (javax and jakarta),
-  `JdbcTemplate` `query*`/`update`/`execute`, and MyBatis mapper parameters used with `${}`.
+  `JdbcTemplate` `query*`/`update`/`execute`/`batchUpdate`, plain JDBC statement text
+  (`Statement.execute*`/`addBatch`, `Connection.prepare*`), and MyBatis mapper parameters used with `${}`.
 - **`cwe-117`**: the message of SLF4J `Logger` calls (also when it is built by concatenation, e.g.
   `log.info("code " + code)`) and their `{}` arguments. Log4j and JUL are not in the catalogue.
 - **`cwe-79`**: the text body of a request handler: the `String` a `@ResponseBody`/`@RestController`
   method returns, or the `String` passed to `ResponseEntity.ok`/`body`. It is checked by the plugin
   `vkr.plugin.ResponseBodySink`, because Spring writes the body outside the analysed code. Object
   bodies are serialised as JSON and are not sinks. Spring `HtmlUtils.htmlEscape`, commons-text and
-  lang3 `escapeHtml4`, and OWASP `Encode.forHtml` are sanitizers.
+  lang3 `escapeHtml4`, commons-lang `escapeHtml`, and OWASP `Encode.forHtml` are sanitizers. In a
+  servlet application the body is what the servlet writes to its `PrintWriter` (`print`, `println`,
+  `write`, `format`, `printf`, `append`).
 - **`cwe-918`**: `URL.openConnection`/`openStream` and `HttpRequest.newBuilder(URI)`/`Builder.uri`.
   `URI.create` and `new URL(..)` carry taint to the URL.
 - **`cwe-1336`**: a template compiled from a string: the FreeMarker `Template` constructors,
   Thymeleaf `TemplateEngine.process` and Velocity `evaluate`.
+- **`cwe-78`**: an OS command: `Runtime.exec` (command line, arguments and environment) and
+  `ProcessBuilder` (constructor and `command`).
+- **`cwe-22`**: a file named by request text: the `File`, `FileInputStream`, `FileOutputStream`,
+  `FileReader`, `FileWriter` and `RandomAccessFile` constructors and `Paths.get`.
 
 The default is `[cwe-89, cwe-117]`. List the other catalogues in `taint.sinks` to enable them.
 
 Examples: [`taint/config/ecommerce.vkr-taint.yml`](taint/config/ecommerce.vkr-taint.yml) (the
-testbed); [`experiments/public/*.vkr-taint.yml`](experiments/public) (train-ticket, mall-swarm).
+testbed); [`experiments/public/*.vkr-taint.yml`](experiments/public) (train-ticket, mall-swarm,
+OWASP BenchmarkJava).
 
 ## Output
 
@@ -203,6 +211,18 @@ In `vkr-taint.sarif`:
 A service whose analysis fails does not stop the run. It is listed under `failed`, and the log path
 is in the report.
 
+### Servlet applications
+
+A module packaged as a war whose classes extend `HttpServlet` (javax or jakarta), without Spring
+request mappings, is a service as well. Its `doGet`/`doPost`/... methods are the entry points
+(`vkr.plugin.ServletEntryPoints`), the request getters (`getParameter`, `getParameterValues`,
+`getParameterMap`, `getParameterNames`, `getHeader`, `getHeaders`, `getHeaderNames`, `getQueryString`,
+`Cookie.getValue`) are the sources, and a finding names `Servlet#doPost`. The libraries are read from
+`WEB-INF/lib`. The Servlet API is usually not packaged (scope `provided`): the analysis then uses the
+signature-only stubs in [`taint/servlet-stubs`](taint/servlet-stubs). Servlet code handles raw request
+strings, so a servlet application also gets JDK transfers for splitting, replacing, encoding and
+decoding text that the Spring services do not need.
+
 ## Limits
 
 - **Maven projects only.** The Gradle layout (`build/classes`, `build/libs`) is read, but
@@ -214,6 +234,8 @@ is in the report.
 - **Kotlin:** the channel model is built from Java sources. Request handlers of Kotlin controllers
   are read from the bytecode and become sources when the system has no gateway, but they have no
   endpoint id (a finding names `Class#method`), and Kotlin Feign clients and listeners are not seen.
+- **Servlets:** one war is one service; servlet filters, JSPs and `web.xml` mappings are not read, and
+  `HttpSession` attributes are not followed.
 - **Sinks:** only the catalogues above are built in. Others can be given as Tai-e taint yml files.
 - **Cost:**
   - a commit that changes a shared module or a library version re-analyses every service that

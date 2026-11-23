@@ -67,6 +67,12 @@ CATALOGUES = {
             {'method': '<org.springframework.jdbc.core.JdbcTemplate: * query*(java.lang.String,*{0+})>', 'index': 0},
             {'method': '<org.springframework.jdbc.core.JdbcTemplate: int update(java.lang.String,*{0+})>', 'index': 0},
             {'method': '<org.springframework.jdbc.core.JdbcTemplate: void execute(java.lang.String)>', 'index': 0},
+            {'method': '<org.springframework.jdbc.core.JdbcTemplate: int[] batchUpdate(java.lang.String[])>', 'index': '0[*]'},
+        ]),
+        ('SQL injection: plain JDBC (the statement text; a PreparedStatement parameter is bound, not a sink)', [
+            {'method': '<java.sql.Statement: * execute*(java.lang.String,*{0+})>', 'index': 0},
+            {'method': '<java.sql.Statement: void addBatch(java.lang.String)>', 'index': 0},
+            {'method': '<java.sql.Connection: * prepare*(java.lang.String,*{0+})>', 'index': 0},
         ]),
     ],
     'cwe-117': [
@@ -103,7 +109,45 @@ CATALOGUES = {
     ],
     # CWE-79: the response body of a web handler is the sink; vkr.plugin.ResponseBodySink checks it
     # after the analysis (a return value is not a call site), so the catalogue has no call sinks
+    # (a servlet writes its body through the response writer: SERVLET_SINKS)
     'cwe-79': [],
+    'cwe-78': [
+        ('OS command injection (CWE-78): the command line, its arguments or its environment', [
+            {'method': '<java.lang.Runtime: java.lang.Process exec(java.lang.String)>', 'index': 0},
+            {'method': '<java.lang.Runtime: java.lang.Process exec(java.lang.String[])>', 'index': '0[*]'},
+            {'method': '<java.lang.Runtime: java.lang.Process exec(java.lang.String,java.lang.String[])>', 'index': 0},
+            {'method': '<java.lang.Runtime: java.lang.Process exec(java.lang.String,java.lang.String[])>', 'index': '1[*]'},
+            {'method': '<java.lang.Runtime: java.lang.Process exec(java.lang.String[],java.lang.String[])>', 'index': '0[*]'},
+            {'method': '<java.lang.Runtime: java.lang.Process exec(java.lang.String[],java.lang.String[])>', 'index': '1[*]'},
+            {'method': '<java.lang.Runtime: java.lang.Process exec(java.lang.String,java.lang.String[],java.io.File)>', 'index': 0},
+            {'method': '<java.lang.Runtime: java.lang.Process exec(java.lang.String,java.lang.String[],java.io.File)>', 'index': '1[*]'},
+            {'method': '<java.lang.Runtime: java.lang.Process exec(java.lang.String[],java.lang.String[],java.io.File)>', 'index': '0[*]'},
+            {'method': '<java.lang.Runtime: java.lang.Process exec(java.lang.String[],java.lang.String[],java.io.File)>', 'index': '1[*]'},
+            {'method': '<java.lang.ProcessBuilder: void <init>(java.lang.String[])>', 'index': '0[*]'},
+            {'method': '<java.lang.ProcessBuilder: void <init>(java.util.List)>', 'index': 0},
+            {'method': '<java.lang.ProcessBuilder: java.lang.ProcessBuilder command(java.lang.String[])>', 'index': '0[*]'},
+            {'method': '<java.lang.ProcessBuilder: java.lang.ProcessBuilder command(java.util.List)>', 'index': 0},
+        ]),
+    ],
+    'cwe-22': [
+        ('path traversal (CWE-22): request text names the file opened', [
+            {'method': '<java.io.File: void <init>(java.lang.String)>', 'index': 0},
+            {'method': '<java.io.File: void <init>(java.lang.String,java.lang.String)>', 'index': 0},
+            {'method': '<java.io.File: void <init>(java.lang.String,java.lang.String)>', 'index': 1},
+            {'method': '<java.io.File: void <init>(java.io.File,java.lang.String)>', 'index': 1},
+            {'method': '<java.io.File: void <init>(java.net.URI)>', 'index': 0},
+            {'method': '<java.io.FileInputStream: void <init>(java.lang.String)>', 'index': 0},
+            {'method': '<java.io.FileOutputStream: void <init>(java.lang.String)>', 'index': 0},
+            {'method': '<java.io.FileOutputStream: void <init>(java.lang.String,boolean)>', 'index': 0},
+            {'method': '<java.io.FileReader: void <init>(java.lang.String)>', 'index': 0},
+            {'method': '<java.io.FileWriter: void <init>(java.lang.String)>', 'index': 0},
+            {'method': '<java.io.FileWriter: void <init>(java.lang.String,boolean)>', 'index': 0},
+            {'method': '<java.io.RandomAccessFile: void <init>(java.lang.String,java.lang.String)>', 'index': 0},
+            {'method': '<java.nio.file.Paths: java.nio.file.Path get(java.lang.String,java.lang.String[])>', 'index': 0},
+            {'method': '<java.nio.file.Paths: java.nio.file.Path get(java.lang.String,java.lang.String[])>', 'index': '1[*]'},
+            {'method': '<java.nio.file.Paths: java.nio.file.Path get(java.net.URI)>', 'index': 0},
+        ]),
+    ],
 }
 # transfers that only a catalogue needs (the URL or template text derived from the request text)
 CATALOGUE_TRANSFERS = {
@@ -117,6 +161,10 @@ CATALOGUE_TRANSFERS = {
     'cwe-1336': [
         ('<java.io.StringReader: void <init>(java.lang.String)>', 0, 'base'),
     ],
+    'cwe-22': [
+        ('<java.net.URI: void <init>(java.lang.String)>', 0, 'base'),
+        ('<java.net.URI: java.net.URI create(java.lang.String)>', 0, 'result'),
+    ],
 }
 # HTML encoders end a flow (a Tai-e sanitizer is global: encoded text is clean for every sink)
 CATALOGUE_SANITIZERS = {
@@ -127,8 +175,113 @@ CATALOGUE_SANITIZERS = {
         {'kind': 'param', 'method': '<org.apache.commons.lang3.StringEscapeUtils: java.lang.String escapeHtml4(java.lang.String)>', 'index': 0},
         {'kind': 'param', 'method': '<org.owasp.encoder.Encode: java.lang.String forHtml(java.lang.String)>', 'index': 0},
         {'kind': 'param', 'method': '<org.owasp.encoder.Encode: java.lang.String forHtmlContent(java.lang.String)>', 'index': 0},
+        {'kind': 'param', 'method': '<org.apache.commons.lang.StringEscapeUtils: java.lang.String escapeHtml(java.lang.String)>', 'index': 0},
     ],
 }
+
+# A servlet application (an HttpServlet subclass, no Spring request mapping) reads the request through
+# getters: their results are the sources ({ns} = javax or jakarta). An array result is typed by its
+# elements: vkr.plugin.ServletEntryPoints lets an array load from a tainted array read the taint.
+SERVLET_SOURCES = [
+    ('{ns}.servlet.ServletRequest', 'java.lang.String getParameter(java.lang.String)', None),
+    ('{ns}.servlet.ServletRequest', 'java.lang.String[] getParameterValues(java.lang.String)', 'java.lang.String'),
+    ('{ns}.servlet.ServletRequest', 'java.util.Map getParameterMap()', None),
+    ('{ns}.servlet.ServletRequest', 'java.util.Enumeration getParameterNames()', None),
+    ('{ns}.servlet.http.HttpServletRequest', 'java.lang.String getHeader(java.lang.String)', None),
+    ('{ns}.servlet.http.HttpServletRequest', 'java.util.Enumeration getHeaders(java.lang.String)', None),
+    ('{ns}.servlet.http.HttpServletRequest', 'java.util.Enumeration getHeaderNames()', None),
+    ('{ns}.servlet.http.HttpServletRequest', 'java.lang.String getQueryString()', None),
+    ('{ns}.servlet.http.Cookie', 'java.lang.String getValue()', None),  # cookies of the request
+]
+# the text a servlet writes to its response writer (CWE-79)
+SERVLET_SINKS = [
+    {'method': f'<java.io.PrintWriter: {sig}>', 'index': i} for sig, i in [
+        ('void print(java.lang.String)', 0), ('void println(java.lang.String)', 0),
+        ('void print(java.lang.Object)', 0), ('void println(java.lang.Object)', 0),
+        ('void print(char[])', 0), ('void println(char[])', 0),
+        ('void write(java.lang.String)', 0), ('void write(java.lang.String,int,int)', 0),
+        ('void write(char[])', 0), ('void write(char[],int,int)', 0),
+        ('java.io.PrintWriter format(java.lang.String,java.lang.Object[])', 0),
+        ('java.io.PrintWriter format(java.lang.String,java.lang.Object[])', '1[*]'),
+        ('java.io.PrintWriter printf(java.lang.String,java.lang.Object[])', 0),
+        ('java.io.PrintWriter printf(java.lang.String,java.lang.Object[])', '1[*]'),
+        ('java.io.PrintWriter format(java.util.Locale,java.lang.String,java.lang.Object[])', 1),
+        ('java.io.PrintWriter format(java.util.Locale,java.lang.String,java.lang.Object[])', '2[*]'),
+        ('java.io.PrintWriter printf(java.util.Locale,java.lang.String,java.lang.Object[])', 1),
+        ('java.io.PrintWriter printf(java.util.Locale,java.lang.String,java.lang.Object[])', '2[*]'),
+        ('java.io.PrintWriter append(java.lang.CharSequence)', 0),
+    ]]
+# Servlet code works on the raw request strings with JDK (and commons-codec) APIs that the Spring
+# services do not need: binding gives them typed values. Added only for a servlet application, so the
+# configurations of the Spring testbeds stay as measured.
+SERVLET_TRANSFERS = [
+    # the element type is given (4th item): the code casts what nextElement()/get() return, and Tai-e
+    # drops a taint object of type Object at a cast to String / String[]
+    ('request getters returning containers', [
+        ('<java.util.Enumeration^: java.lang.Object nextElement()>', 'base', 'result', 'java.lang.String'),
+        ('<java.util.Map^: java.lang.Object get(java.lang.Object)>', 'base', 'result', 'java.lang.String[]'),
+        ('<java.util.Map^: java.util.Collection values()>', 'base', 'result'),
+        ('<java.util.Map^: java.util.Set entrySet()>', 'base', 'result'),
+        # no ^ with an array type (Tai-e cannot combine a subtype pattern with one): the concrete classes
+        ('<java.util.ArrayList: java.lang.Object[] toArray()>', 'base', 'result'),
+        ('<java.util.LinkedList: java.lang.Object[] toArray()>', 'base', 'result'),
+    ]),
+    ('strings, bytes and characters', [
+        ('<java.lang.String: java.lang.String[] split(java.lang.String)>', 'base', 'result'),
+        ('<java.lang.String: java.lang.String[] split(java.lang.String,int)>', 'base', 'result'),
+        ('<java.lang.String: java.lang.String substring(int)>', 'base', 'result'),
+        ('<java.lang.String: java.lang.String replace(char,char)>', 'base', 'result'),
+        ('<java.lang.String: java.lang.String replace(java.lang.CharSequence,java.lang.CharSequence)>', 'base', 'result'),
+        ('<java.lang.String: java.lang.String replace(java.lang.CharSequence,java.lang.CharSequence)>', 1, 'result'),
+        ('<java.lang.String: java.lang.String replaceAll(java.lang.String,java.lang.String)>', 'base', 'result'),
+        ('<java.lang.String: java.lang.String replaceFirst(java.lang.String,java.lang.String)>', 'base', 'result'),
+        ('<java.lang.String: java.lang.String concat(java.lang.String)>', 'base', 'result'),
+        ('<java.lang.String: java.lang.String concat(java.lang.String)>', 0, 'result'),
+        ('<java.lang.String: java.lang.String toLowerCase()>', 'base', 'result'),
+        ('<java.lang.String: java.lang.String toUpperCase()>', 'base', 'result'),
+        ('<java.lang.String: java.lang.String intern()>', 'base', 'result'),
+        ('<java.lang.String: java.lang.String toString()>', 'base', 'result'),
+        ('<java.lang.String: char[] toCharArray()>', 'base', 'result'),
+        ('<java.lang.String: byte[] getBytes()>', 'base', 'result'),
+        ('<java.lang.String: byte[] getBytes(java.lang.String)>', 'base', 'result'),
+        ('<java.lang.String: byte[] getBytes(java.nio.charset.Charset)>', 'base', 'result'),
+        ('<java.lang.String: void <init>(java.lang.String)>', 0, 'base'),
+        ('<java.lang.String: void <init>(char[])>', 0, 'base'),
+        ('<java.lang.String: void <init>(byte[])>', 0, 'base'),
+        ('<java.lang.String: void <init>(byte[],java.lang.String)>', 0, 'base'),
+        ('<java.lang.String: void <init>(byte[],java.nio.charset.Charset)>', 0, 'base'),
+        ('<java.lang.String: void <init>(char[],int,int)>', 0, 'base'),
+        ('<java.lang.String: java.lang.String valueOf(char[])>', 0, 'result'),
+        ('<java.lang.String: java.lang.String valueOf(char[],int,int)>', 0, 'result'),
+        ('<java.lang.String: java.lang.String copyValueOf(char[])>', 0, 'result'),
+        ('<java.lang.String: java.lang.String join(java.lang.CharSequence,java.lang.Iterable)>', 1, 'result'),
+        ('<java.lang.StringBuilder: void <init>(java.lang.String)>', 0, 'base'),
+        ('<java.lang.StringBuilder: void <init>(java.lang.CharSequence)>', 0, 'base'),
+        ('<java.lang.StringBuffer: void <init>(java.lang.String)>', 0, 'base'),
+        ('<java.lang.AbstractStringBuilder^: * insert(int,java.lang.String)>', 1, 'base'),
+        ('<java.lang.StringBuilder: java.lang.StringBuilder append(char[])>', 0, 'base'),
+        ('<java.lang.StringBuffer: java.lang.StringBuffer append(char[])>', 0, 'base'),
+        ('<java.lang.AbstractStringBuilder^: * append(java.lang.CharSequence)>', 0, 'base'),
+        ('<java.lang.AbstractStringBuilder^: * replace(int,int,java.lang.String)>', 2, 'base'),
+        ('<java.lang.AbstractStringBuilder^: * replace(int,int,java.lang.String)>', 'base', 'result'),
+        ('<java.lang.AbstractStringBuilder^: * substring(int)>', 'base', 'result'),
+        ('<java.lang.AbstractStringBuilder^: * substring(int,int)>', 'base', 'result'),
+        ('<java.lang.AbstractStringBuilder^: * reverse()>', 'base', 'result'),
+        ('<java.lang.AbstractStringBuilder^: * append(java.lang.Object^)>', 'base', 'result'),
+        ('<java.lang.AbstractStringBuilder^: * append(java.lang.String)>', 'base', 'result'),
+    ]),
+    ('decoders and encoders that keep the attacker text', [
+        ('<java.net.URLDecoder: java.lang.String decode(java.lang.String,java.lang.String)>', 0, 'result'),
+        ('<java.net.URLDecoder: java.lang.String decode(java.lang.String)>', 0, 'result'),
+        ('<java.util.Base64$Decoder: byte[] decode(byte[])>', 0, 'result'),
+        ('<java.util.Base64$Decoder: byte[] decode(java.lang.String)>', 0, 'result'),
+        ('<java.util.Base64$Encoder: byte[] encode(byte[])>', 0, 'result'),
+        ('<java.util.Base64$Encoder: java.lang.String encodeToString(byte[])>', 0, 'result'),
+        ('<org.apache.commons.codec.binary.Base64: byte[] decodeBase64(byte[])>', 0, 'result'),
+        ('<org.apache.commons.codec.binary.Base64: byte[] decodeBase64(java.lang.String)>', 0, 'result'),
+        ('<org.apache.commons.codec.binary.Base64: byte[] encodeBase64(byte[])>', 0, 'result'),
+    ]),
+]
 
 # RestTemplate calls of the channel model (clientKind REST_TEMPLATE): the URL (path variables and
 # query parameters concatenated into it) and the request body are the outgoing channel end.
@@ -430,11 +583,23 @@ class Service:
         hits = self.by_simple.get(name, [])
         return sorted(hits, key=lambda c: (c not in self.app_classes, c))
 
+    def servlet_namespaces(self):
+        """'javax' and/or 'jakarta' when an application class extends that HttpServlet."""
+        found = []
+        for ns in ('javax', 'jakarta'):
+            needle = f'{ns}/servlet/http/HttpServlet'.encode()
+            for c in self.app_classes:
+                with open(os.path.join(self.app, *c.split('.')) + '.class', 'rb') as f:
+                    if needle in f.read():
+                        found.append(ns)
+                        break
+        return found
+
     def has_library(self, prefix):
         if not self.jar:
             return False
         with zipfile.ZipFile(self.jar) as z:
-            return any(n.startswith('BOOT-INF/lib/' + prefix) for n in z.namelist())
+            return any(n.startswith(tuple(p + prefix for p in vkr_config.LIB_PREFIXES)) for n in z.namelist())
 
     def has_class_or_jdk(self, name):
         """has_class, or a class of the JDK (java.*), which the JRE model always has."""
@@ -452,7 +617,7 @@ class Service:
         if not found and self.jar:
             with zipfile.ZipFile(self.jar) as z:
                 for n in z.namelist():
-                    if not (n.startswith('BOOT-INF/lib/') and n.endswith('.jar')):
+                    if not (n.startswith(vkr_config.LIB_PREFIXES) and n.endswith('.jar')):
                         continue
                     try:
                         with z.open(n) as raw, zipfile.ZipFile(io.BytesIO(raw.read())) as lib:
@@ -543,6 +708,13 @@ def generate(cfg, model, module, java_home):
                     sources.append(entry)
                 if (t in svc.app_classes or t in svc.shared_classes) and not t.endswith('[]'):
                     dto_classes.add(t)
+    servlet_ns = svc.servlet_namespaces()
+    servlet_sources = [{'kind': 'call', 'method': f'<{cls.format(ns=ns)}: {sig}>', 'index': 'result',
+                        **({'type': t} if t else {})}
+                       for ns in servlet_ns for cls, sig, t in SERVLET_SOURCES]
+    if servlet_ns:
+        notes.append(f'servlet application ({", ".join(servlet_ns)}): the request getters are sources '
+                     f'and every doGet/doPost/... of an HttpServlet subclass is an entry point')
     listener_sources = []
     payload_types = set()
     for l in sorted(listeners, key=lambda l: (l['handler']['className'], l['handler']['line'])):
@@ -665,6 +837,8 @@ def generate(cfg, model, module, java_home):
         else:
             from vkr_yaml import load
             sink_groups.append((f'catalogue {os.path.basename(cat)}', (load(cat) or {}).get('sinks') or []))
+    if servlet_ns and 'cwe-79' in cfg['taint']['sinks']:
+        sink_groups.append(('XSS (CWE-79): the text a servlet writes to its response writer', SERVLET_SINKS))
 
     # ---- transfers
     transfer_groups = []
@@ -681,6 +855,10 @@ def generate(cfg, model, module, java_home):
                                 [{'method': m, 'from': f, 'to': t} for m, f, t in REST_TEMPLATE_TRANSFERS]))
     for title, items in JDK_TRANSFERS:
         transfer_groups.append((title, [{'method': m, 'from': f, 'to': t} for m, f, t in items]))
+    for title, items in SERVLET_TRANSFERS if servlet_ns else []:
+        kept = [x for x in items if svc.has_class_or_jdk(x[0][1:].split(':')[0].rstrip('^'))]
+        transfer_groups.append((f'servlet: {title}', [{'method': x[0], 'from': x[1], 'to': x[2],
+                                                        **({'type': x[3]} if len(x) > 3 else {})} for x in kept]))
     sanitizers = []
     for cat in cfg['taint']['sinks']:
         kept = [(m, f, t) for m, f, t in CATALOGUE_TRANSFERS.get(cat, [])
@@ -697,6 +875,9 @@ def generate(cfg, model, module, java_home):
     if sources:
         lines.append('  # HTTP endpoints')
         lines += [f'  - {dump_entry(e)}' for e in sources]
+    if servlet_sources:
+        lines.append('  # servlet request getters')
+        lines += [f'  - {dump_entry(e)}' for e in servlet_sources]
     if listener_sources:
         lines.append('  # AMQP listener payloads (replaced by the event field sources in the field-level config)')
         lines += [f'  - {dump_entry(e)}  # AMQP listener' for e in listener_sources]
