@@ -40,8 +40,8 @@ jobs:
           python3 -I -m unittest discover -s analysis/taint/tests -p "test_*.py"
           python3 -I -m unittest discover -s analysis/experiments -p "test_*.py"
 
-      - name: Micans launcher plugins
-        run: python3 -I analysis/taint/launcher/test/run_tests.py
+      # the launcher plugin tests (analysis/taint/launcher/test/run_tests.py) compile against the Micans
+      # jar, which only the tool image builds: they run locally with MICANS_JAR set
 
       - name: Channel extractor
         working-directory: analysis/channel-extractor
