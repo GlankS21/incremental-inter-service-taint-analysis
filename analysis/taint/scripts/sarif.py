@@ -16,7 +16,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from incremental import chain_key, finding_key, group_findings  # noqa: E402
+from incremental import finding_key, group_findings  # noqa: E402
 
 RULES = {
     'CWE-89': ('SqlInjection', 'SQL injection',

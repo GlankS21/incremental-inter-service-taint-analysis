@@ -148,6 +148,18 @@ class LoadTest(Base):
         # not required: loads
         vkr_config.load(p, env={})
 
+    def test_toolchain_and_heap_left_out_take_the_environment(self):
+        p = self.config(MINIMAL.split('toolchain:')[0])
+        cfg = vkr_config.load(p, env=self.env(VKR_HEAP='12g'), require=('java', 'micans'))
+        self.assertEqual(cfg['toolchain'], {'java_home': self.jdk, 'micans_jar': self.micans})
+        self.assertEqual(cfg['analysis']['heap'], '12g')
+        cfg = vkr_config.load(p, env={'JAVA_HOME': self.jdk, 'MICANS_JAR': self.micans}, require=('micans',))
+        self.assertEqual(cfg['toolchain']['micans_jar'], self.micans)
+        self.assertEqual(cfg['analysis']['heap'], '24g')
+        with self.assertRaises(vkr_config.ConfigError) as e:
+            vkr_config.load(p, env={}, require=('java',))
+        self.assertIn('toolchain.java-home: missing', str(e.exception))
+
     def test_toolchain_paths_checked(self):
         p = self.config(MINIMAL)
         with self.assertRaises(vkr_config.ConfigError) as e:
