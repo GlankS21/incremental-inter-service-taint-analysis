@@ -22,6 +22,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  unit-tests:
+    name: Unit tests of the tool
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Scripts
+        run: |
+          python3 -I -m unittest discover -s analysis/taint/tests -p "test_*.py"
+          python3 -I -m unittest discover -s analysis/experiments -p "test_*.py"
+
+      - name: Micans launcher plugins
+        run: python3 -I analysis/taint/launcher/test/run_tests.py
+
+      - name: Channel extractor
+        working-directory: analysis/channel-extractor
+        run: sh mvnw -B -ntp test
+
   taint:
     name: Incremental taint analysis
     runs-on: ubuntu-latest

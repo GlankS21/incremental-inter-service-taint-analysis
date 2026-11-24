@@ -12,8 +12,8 @@
       packages: { dto: [..], entity: [..], event: [..] }   # optional override of the discovery
       overrides: vkr-taint-overrides.yml
       base-config: null        # optional: hand-written per-service base config, {service}/{short}
-    analysis:  { context: 1-call, heap: 24g, world-cache: ro }
-    toolchain: { java-home: ${JAVA_HOME}, micans-jar: ${VKR_MICANS_JAR} }
+    analysis:  { context: 1-call, heap: 24g, world-cache: ro }   # heap left out: ${VKR_HEAP:-24g}
+    toolchain: { java-home: ${JAVA_HOME}, micans-jar: ${VKR_MICANS_JAR} }   # the same when left out
     gate:      { baseline: reports/taint-baseline.json, fail-on: new-chains }
 
 ${NAME} and ${NAME:-default} are replaced from the environment (defaults may nest). Relative paths
@@ -328,7 +328,7 @@ def load(path=None, env=None, require=()):
     ctx = str(analysis.get('context', '1-call'))
     if not re.fullmatch(r'ci|\d+-(call|obj|type)', ctx):
         errors.append(f'analysis.context: expected ci, k-call, k-obj or k-type, got {ctx!r}')
-    heap = str(analysis.get('heap', '24g'))
+    heap = str(analysis.get('heap', env.get('VKR_HEAP') or '24g'))
     if not re.fullmatch(r'\d+[kKmMgG]?', heap):
         errors.append(f'analysis.heap: expected a JVM size such as 24g, got {heap!r}')
     wc = str(analysis.get('world-cache', 'off'))
@@ -336,7 +336,12 @@ def load(path=None, env=None, require=()):
         errors.append(f'analysis.world-cache: expected off, rw or ro, got {wc!r}')
     cfg['analysis'] = {'context': ctx, 'heap': heap, 'world_cache': wc}
 
-    toolchain = _section(raw, 'toolchain', errors)
+    toolchain = dict(_section(raw, 'toolchain', errors))
+    # a key left out takes the variable of the default configuration (the image sets both)
+    for key, value in (('java-home', env.get('JAVA_HOME')),
+                       ('micans-jar', env.get('VKR_MICANS_JAR') or env.get('MICANS_JAR'))):
+        if key not in toolchain and value:
+            toolchain[key] = value
     cfg['toolchain'] = {'java_home': _abs(base, toolchain.get('java-home')),
                         'micans_jar': _abs(base, toolchain.get('micans-jar'))}
     _check_toolchain(cfg, toolchain, toolchain_missing, require, errors)

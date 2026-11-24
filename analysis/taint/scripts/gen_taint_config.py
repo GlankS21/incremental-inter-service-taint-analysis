@@ -352,10 +352,6 @@ JDK_TRANSFERS = [
 ]
 
 
-class GenError(Exception):
-    pass
-
-
 # ------------------------------------------------------------------ bytecode (javap)
 
 _DESC = re.compile(r'\[*(?:[BCDFIJSZV]|L[^;]+;)')

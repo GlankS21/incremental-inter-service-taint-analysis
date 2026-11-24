@@ -5,14 +5,15 @@ pipeline must not depend on them. The behavioural test runs summarize.py's summa
 with an open() audit hook and asserts no .dot path is ever opened; the static test asserts the
 script itself mentions no .dot file.
 
-usage: pytest test_summarize_no_dot.py
+run:   python -I -m unittest discover -s analysis/experiments -p "test_*.py"
 """
 import json
 import os
+import pathlib
 import subprocess
 import sys
-
-import pytest
+import tempfile
+import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SUMMARIZE = os.path.join(HERE, os.pardir, 'taint', 'scripts', 'summarize.py')
@@ -51,8 +52,7 @@ def run_driver(tmp_path, mode, argv):
     return dots
 
 
-@pytest.fixture
-def tiny_model(tmp_path):
+def make_tiny_model(tmp_path):
     # two services, one HTTP channel, endpoints with field inputs
     model = {'services': ['svc-a', 'svc-b'],
              'endpoints': [
@@ -72,47 +72,61 @@ def tiny_model(tmp_path):
     return str(m)
 
 
-def test_compose_reads_no_dot(tmp_path, tiny_model):
-    s1 = {'service': 'svc-a', 'entries': [
-        {'entry': 'ep:svc-a:POST /pay', 'input': 'cardNumber',
-         'exits': [{'kind': 'CHANNEL', 'channel': 'http:svc-a:PayClient#book', 'arg': '0'}]}]}
-    s2 = {'service': 'svc-b', 'entries': [
-        {'entry': 'ep:svc-b:POST /book', 'input': 'cardNumber',
-         'exits': [{'kind': 'LOCAL', 'cwe': 'CWE-117', 'site': 'b.BookController#book:9'}]}]}
-    p1 = tmp_path / 'svc-a.json'
-    p1.write_text(json.dumps(s1), encoding='utf-8')
-    p2 = tmp_path / 'svc-b.json'
-    p2.write_text(json.dumps(s2), encoding='utf-8')
-    out = tmp_path / 'composed.txt'
-    r = subprocess.run([sys.executable, '-I', SUMMARIZE, 'compose', tiny_model, str(p1), str(p2)],
-                       capture_output=True, text=True, encoding='utf-8', errors='replace')
-    assert r.returncode == 0, r.stderr
-    assert 'CWE-117' in r.stdout
-    # the same composition through the audit-hooked driver opens no .dot
-    dots = run_driver(tmp_path, 'compose', [tiny_model, str(p1), str(p2)])
-    assert dots == []
+class SummarizeReadsNoDotTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp_path = pathlib.Path(self._tmp.name)
+
+    def test_compose_reads_no_dot(self):
+        tmp_path = self.tmp_path
+        tiny_model = make_tiny_model(tmp_path)
+        s1 = {'service': 'svc-a', 'entries': [
+            {'entry': 'ep:svc-a:POST /pay', 'input': 'cardNumber',
+             'exits': [{'kind': 'CHANNEL', 'channel': 'http:svc-a:PayClient#book', 'arg': '0'}]}]}
+        s2 = {'service': 'svc-b', 'entries': [
+            {'entry': 'ep:svc-b:POST /book', 'input': 'cardNumber',
+             'exits': [{'kind': 'LOCAL', 'cwe': 'CWE-117', 'site': 'b.BookController#book:9'}]}]}
+        p1 = tmp_path / 'svc-a.json'
+        p1.write_text(json.dumps(s1), encoding='utf-8')
+        p2 = tmp_path / 'svc-b.json'
+        p2.write_text(json.dumps(s2), encoding='utf-8')
+        out = tmp_path / 'composed.txt'
+        r = subprocess.run([sys.executable, '-I', SUMMARIZE, 'compose', tiny_model, str(p1), str(p2)],
+                           capture_output=True, text=True, encoding='utf-8', errors='replace')
+        assert r.returncode == 0, r.stderr
+        assert 'CWE-117' in r.stdout
+        # the same composition through the audit-hooked driver opens no .dot
+        dots = run_driver(tmp_path, 'compose', [tiny_model, str(p1), str(p2)])
+        assert dots == []
 
 
-def test_summary_reads_no_dot(tmp_path, tiny_model):
-    log = tmp_path / 'tai-e.log'
-    log.write_text('TaintFlow{<a.PayController: void pay(a.PayReq)>/0/cardNumber '
-                   '-> <b.BookController: void book(a.BookReq)>[3@L9] invokestatic '
-                   'taint.SourceSink.sink(x)/0}\n', encoding='utf-8')
-    app = tmp_path / 'app'
-    (app / 'a').mkdir(parents=True)
-    common = tmp_path / 'common'
-    common.mkdir()
-    out = tmp_path / 'summary.json'
-    r = subprocess.run([sys.executable, '-I', SUMMARIZE, 'summary', 'svc-a', str(log), tiny_model,
-                        str(out), str(app), str(common)], capture_output=True, text=True,
-                       encoding='utf-8')
-    assert r.returncode == 0, r.stderr
-    assert out.exists()
-    dots = run_driver(tmp_path, 'summary', ['svc-a', str(log), tiny_model, str(out), str(app),
-                                            str(common)])
-    assert dots == []
+    def test_summary_reads_no_dot(self):
+        tmp_path = self.tmp_path
+        tiny_model = make_tiny_model(tmp_path)
+        log = tmp_path / 'tai-e.log'
+        log.write_text('TaintFlow{<a.PayController: void pay(a.PayReq)>/0/cardNumber '
+                       '-> <b.BookController: void book(a.BookReq)>[3@L9] invokestatic '
+                       'taint.SourceSink.sink(x)/0}\n', encoding='utf-8')
+        app = tmp_path / 'app'
+        (app / 'a').mkdir(parents=True)
+        common = tmp_path / 'common'
+        common.mkdir()
+        out = tmp_path / 'summary.json'
+        r = subprocess.run([sys.executable, '-I', SUMMARIZE, 'summary', 'svc-a', str(log), tiny_model,
+                            str(out), str(app), str(common)], capture_output=True, text=True,
+                           encoding='utf-8')
+        assert r.returncode == 0, r.stderr
+        assert out.exists()
+        dots = run_driver(tmp_path, 'summary', ['svc-a', str(log), tiny_model, str(out), str(app),
+                                                str(common)])
+        assert dots == []
 
 
-def test_source_mentions_no_dot():
-    t = open(SUMMARIZE, encoding='utf-8').read()
-    assert '.dot' not in t
+    def test_source_mentions_no_dot(self):
+        t = open(SUMMARIZE, encoding='utf-8').read()
+        assert '.dot' not in t
+
+
+if __name__ == '__main__':
+    unittest.main()
