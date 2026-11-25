@@ -22,8 +22,9 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 T = os.path.join(os.path.dirname(HERE), 'taint')
 JAVA_HOME = os.environ.get('JAVA_HOME', 'C:/Program Files/Java/jdk-24')
-MICANS_JAR = os.environ.get('MICANS_JAR', 'C:/Users/asgat/OneDrive/Máy tính/WorkSpace/ITMO - Thsi/'
-                            'vkr-artifacts/miscans/src-extract/micans-source/build/micans.jar')
+MICANS_JAR = os.environ.get('VKR_MICANS_JAR') or os.environ.get('MICANS_JAR')
+if not MICANS_JAR:
+    raise SystemExit('set VKR_MICANS_JAR (or MICANS_JAR) to the Micans jar')
 SERVICES = ['cart-service', 'order-service', 'inventory-service', 'payment-service']
 SECTIONS = ('sources', 'sinks', 'transfers', 'sanitizers')
 CHANNEL_SOURCE = re.compile(r'kind: field, field: "<com\.shop\.(common\.event|\w+\.entity)\.')

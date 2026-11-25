@@ -20,9 +20,9 @@ LOCAL = re.compile(r'CWE-(\d+) @ (\S+)$')
 TEST = re.compile(r'BenchmarkTest\d{5}')
 
 
-def flagged(report):
-    """{(test name, cwe)} of the report's chains."""
-    out = set()
+def sink_sites(report):
+    """{(test name, cwe): sink sites} of the report's chains."""
+    out = {}
     for chain in report['chains']:
         text = chain if isinstance(chain, str) else json.dumps(chain)
         m = LOCAL.search(text.rstrip('"]} '))
@@ -31,8 +31,13 @@ def flagged(report):
         cwe, site = m.groups()
         test = TEST.search(site) or TEST.search(text)
         if test:
-            out.add((test.group(0), cwe))
+            out.setdefault((test.group(0), cwe), set()).add(site)
     return out
+
+
+def flagged(report):
+    """{(test name, cwe)} of the report's chains."""
+    return set(sink_sites(report))
 
 
 def main():

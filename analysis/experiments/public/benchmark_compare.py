@@ -6,30 +6,22 @@ usage: benchmark_compare.py <vkr-taint-report.json> <codeql java.sarif> <expecte
 import collections
 import csv
 import json
+import os
 import re
 import sys
 
-CWE_OF = {'sqli': '89', 'xss': '79', 'cmdi': '78', 'pathtraver': '22'}
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from benchmark_score import CATEGORIES as CWE_OF, TEST, sink_sites  # noqa: E402
+
 CQL_CWES = {'sqli': {89, 564}, 'xss': {79}, 'cmdi': {78, 88}, 'pathtraver': {22, 23, 36, 73}}
 CQL_TAINT = {'sqli': {'java/sql-injection'}, 'xss': {'java/xss'},
              'cmdi': {'java/command-line-injection', 'java/exec-tainted-environment'},
              'pathtraver': {'java/path-injection'}}
-LOCAL = re.compile(r'CWE-(\d+) @ (\S+)$')
-TEST = re.compile(r'BenchmarkTest\d{5}')
 CWE = re.compile(r'external/cwe/cwe-0*(\d+)')
 
 report, sarif, expected, out, blob = sys.argv[1:6]
 
-dt = collections.defaultdict(set)            # (test, cwe) -> sink sites
-for chain in json.load(open(report, encoding='utf-8'))['chains']:
-    text = chain if isinstance(chain, str) else json.dumps(chain)
-    m = LOCAL.search(text.rstrip('"]} '))
-    if not m:
-        continue
-    cwe, site = m.groups()
-    t = TEST.search(site) or TEST.search(text)
-    if t:
-        dt[(t.group(0), cwe)].add(site)
+dt = sink_sites(json.load(open(report, encoding='utf-8')))   # (test, cwe) -> sink sites
 
 cq_taint = collections.defaultdict(set)      # (test, cat) -> rule:line
 cq_all = collections.defaultdict(set)

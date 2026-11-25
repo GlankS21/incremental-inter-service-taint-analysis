@@ -3,7 +3,6 @@ package vkr.plugin;
 import micans.plugin.spring.MicroserviceHolder;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import pascal.taie.analysis.pta.core.cs.context.Context;
 import pascal.taie.analysis.pta.core.cs.element.CSManager;
 import pascal.taie.analysis.pta.core.cs.element.CSMethod;
 import pascal.taie.analysis.pta.core.cs.element.CSObj;
@@ -13,15 +12,12 @@ import pascal.taie.analysis.pta.core.solver.EntryPoint;
 import pascal.taie.analysis.pta.core.solver.Solver;
 import pascal.taie.analysis.pta.plugin.Plugin;
 import pascal.taie.analysis.pta.pts.PointsToSet;
-import pascal.taie.ir.IR;
-import pascal.taie.ir.exp.Var;
 import pascal.taie.ir.stmt.LoadArray;
 import pascal.taie.language.classes.JClass;
 import pascal.taie.language.classes.JMethod;
 
 import java.util.List;
 import java.util.Set;
-import java.util.function.Predicate;
 
 /**
  * Entry points and request arrays of a servlet application (a war without Spring request mappings).
@@ -62,8 +58,6 @@ public class ServletEntryPoints implements Plugin {
 
     private CSManager csManager;
 
-    private static final Predicate<CSObj> NOT_TAINT = o -> !ContainerTaint.isTaint(o);
-
     private boolean enabled;
 
     @Override
@@ -99,14 +93,7 @@ public class ServletEntryPoints implements Plugin {
                 || method.isAbstract() || method.isNative()) {
             return;
         }
-        Context ctx = csMethod.getContext();
-        IR ir = method.getIR();
-        if (ir.getThis() != null) {
-            solver.addPointerFilter(csManager.getCSVar(ctx, ir.getThis()), NOT_TAINT);
-        }
-        for (Var param : ir.getParams()) {
-            solver.addPointerFilter(csManager.getCSVar(ctx, param), NOT_TAINT);
-        }
+        ContainerTaint.keepTaintOut(solver, csMethod);
     }
 
     @Override

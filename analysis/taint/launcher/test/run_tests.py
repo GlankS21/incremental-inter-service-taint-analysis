@@ -1,7 +1,8 @@
 """Compiles the launcher and its unit tests, then runs the tests through the JUnit platform
 launcher API.
 
-Works on a clean machine with one command (JAVA_HOME must point to a JDK 17+):
+Works on a clean machine with one command (JAVA_HOME must point to a JDK 17+, VKR_MICANS_JAR or
+MICANS_JAR to the Micans jar, as for the tool):
     python analysis/taint/launcher/test/run_tests.py
 The junit-platform-console-standalone jar (launcher + jupiter engine in one file, used from the
 classpath, not via -jar) is taken from the local Maven repository when present and downloaded from
@@ -18,9 +19,8 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(os.path.dirname(HERE), 'src')
-MICANS_JAR = os.environ.get('MICANS_JAR', 'C:/Users/asgat/OneDrive/Máy tính/WorkSpace/ITMO - Thsi/'
-                            'vkr-artifacts/miscans/src-extract/micans-source/build/micans.jar')
-JAVA_HOME = os.environ.get('JAVA_HOME', 'C:/Program Files/Java/jdk-24')
+MICANS_JAR = os.environ.get('VKR_MICANS_JAR') or os.environ.get('MICANS_JAR')
+JAVA_HOME = os.environ.get('JAVA_HOME')
 CENTRAL = ('https://repo1.maven.org/maven2/org/junit/platform/junit-platform-console-standalone/'
            '{v}/junit-platform-console-standalone-{v}.jar')
 M2_PATH = ('~/.m2/repository/org/junit/platform/junit-platform-console-standalone/'
@@ -40,6 +40,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--junit-version', default='1.12.2')
     a = ap.parse_args()
+    if not JAVA_HOME or not MICANS_JAR:
+        sys.exit('set JAVA_HOME (a JDK 17+) and VKR_MICANS_JAR (or MICANS_JAR, the Micans jar)')
     jar = console_jar(a.junit_version)
     out = os.path.join(os.path.dirname(HERE), 'classes-test')
     src = glob.glob(os.path.join(SRC, '**', '*.java'), recursive=True)
