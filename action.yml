@@ -47,8 +47,8 @@ runs:
   steps:
     # The image builds Micans from its published source (AGPL-3.0, Zenodo 10.5281/zenodo.15050505); the
     # layers are cached in the Actions cache, so the build runs once per change of the tool.
-    - uses: docker/setup-buildx-action@v3
-    - uses: docker/build-push-action@v6
+    - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+    - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
       with:
         context: ${{ github.action_path }}/analysis
         tags: vkr-taint:action
@@ -57,12 +57,12 @@ runs:
         cache-to: type=gha,mode=max,scope=vkr-taint-image
 
     # analysis cache: content-addressed inside, so the newest one of any earlier run is safe to reuse
-    - uses: actions/cache/restore@v4
+    - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: ${{ runner.temp }}/vkr-cache
         key: vkr-taint-cache-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: vkr-taint-cache-
-    - uses: actions/cache/restore@v4
+    - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       if: github.event_name == 'pull_request'
       with:
         path: ${{ runner.temp }}/vkr-baseline
@@ -93,7 +93,7 @@ runs:
         fi
         code=0
         docker run --rm -e VKR_HEAP="$INPUT_HEAP" \
-          -v "$GITHUB_WORKSPACE:/repo" -v "$RUNNER_TEMP/vkr-cache:/cache" \
+          -v "$GITHUB_WORKSPACE:/repo:ro" -v "$RUNNER_TEMP/vkr-cache:/cache" \
           -v "$RUNNER_TEMP/vkr-baseline:/baseline:ro" -v "$out:/out" \
           vkr-taint:action "${args[@]}" || code=$?
         # the container runs as root: give the runner user the files the next steps read and cache
@@ -114,7 +114,7 @@ runs:
             >> "$GITHUB_STEP_SUMMARY" || true
         fi
 
-    - uses: actions/cache/save@v4
+    - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       if: always() && steps.run.outputs.code != ''
       with:
         path: ${{ runner.temp }}/vkr-cache
@@ -125,19 +125,19 @@ runs:
       if: github.event_name == 'push' && github.ref_name == inputs.baseline-branch && steps.run.outputs.code == '0'
       shell: bash
       run: cp "$RUNNER_TEMP/vkr-out/vkr-taint-report.json" "$RUNNER_TEMP/vkr-baseline/report.json"
-    - uses: actions/cache/save@v4
+    - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       if: github.event_name == 'push' && github.ref_name == inputs.baseline-branch && steps.run.outputs.code == '0'
       with:
         path: ${{ runner.temp }}/vkr-baseline
         key: vkr-taint-baseline-${{ github.sha }}
 
-    - uses: github/codeql-action/upload-sarif@v3
+    - uses: github/codeql-action/upload-sarif@74c1aea9df7c0f02e9b7bfe4a8935abf2e5e3aa6 # v3.39.5
       if: always() && inputs.upload-sarif == 'true' && steps.run.outputs.has-sarif == 'true'
       with:
         sarif_file: ${{ steps.run.outputs.sarif }}
         category: vkr-taint
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       if: always()
       with:
         name: vkr-taint-report
@@ -147,10 +147,13 @@ runs:
     - name: Gate
       if: steps.run.outputs.code != '0'
       shell: bash
+      env:
+        CODE: ${{ steps.run.outputs.code }}
+        NEW: ${{ steps.run.outputs.new }}
       run: |
-        case "${{ steps.run.outputs.code }}" in
-          1) echo "::error::vkr-taint: ${{ steps.run.outputs.new }} new finding(s), see the job summary and code scanning";;
+        case "$CODE" in
+          1) echo "::error::vkr-taint: $NEW new finding(s), see the job summary and code scanning";;
           2) echo "::error::vkr-taint: a service could not be analysed, its chains are missing";;
-          *) echo "::error::vkr-taint failed (exit ${{ steps.run.outputs.code }})";;
+          *) echo "::error::vkr-taint failed (exit $CODE)";;
         esac
         exit 1
