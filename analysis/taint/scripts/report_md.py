@@ -3,6 +3,7 @@ recomputed) and every finding (incremental.finding_key: the chains of one entry 
 method), one row each, with a link to the sink line when the SARIF file and the commit URL are given.
 usage: report_md.py <report.json> [title] [--sarif vkr-taint.sarif --blob https://github.com/o/r/blob/<sha>]"""
 import argparse
+import html
 import json
 import os
 import sys
@@ -13,15 +14,21 @@ from sarif import parse, representative, source_labels  # noqa: E402
 
 
 def cell(text):
-    return text.replace('|', '\\|')
+    return text.replace('|', '\\|').replace('\n', ' ').replace('\r', ' ')
+
+
+def code(text):
+    """Text taken from the analysed sources (endpoint paths, labels, names) as a code span: the job
+    summary never renders it as markdown or HTML."""
+    return '`' + str(text).replace('`', "'").replace('\n', ' ').replace('\r', ' ') + '`'
 
 
 def hop(edge, node):
     """One step of a chain: an HTTP call or message to another service, or a row of a shared table."""
     kind, service, name, param = node
     if kind == 'db':
-        return f'{edge[0]} `{param or name}` ({service})'
-    return f'{edge[0]} `{service}` {name}'
+        return f'{edge[0]} {code(param or name)} ({code(service)})'
+    return f'{edge[0]} {code(service)} {code(name)}'
 
 
 def sink_links(sarif_path, blob):
@@ -72,7 +79,7 @@ def main():
     else:
         print(f'{len(r["new"])} new, {len(r["removed"])} removed chains against the baseline.')
     if r.get('failed'):
-        print(f'\n> **{len(r["failed"])} service(s) not analysed, their chains are missing:** {", ".join(r["failed"])}')
+        print(f'\n> **{len(r["failed"])} service(s) not analysed, their chains are missing:** {", ".join(code(x) for x in r["failed"])}')
 
     if findings:
         print('\n| # | | CWE | Entry point | Source | Through | Sink | Chains |\n|---|---|---|---|---|---|---|---|')
@@ -80,7 +87,7 @@ def main():
             main = representative(f['chains'])
             nodes, edges, cwe, cls, method, line = parse(main)
             kind, service, name, param = nodes[0]
-            sources = ', '.join(f'`{s}`' for s in source_labels(f['chains'])) or '-'
+            sources = ', '.join(code(s) for s in source_labels(f['chains'])) or '-'
             through = ' → '.join(hop(e, n) for e, n in zip(edges, nodes[1:])) or '-'
             # another path: other hops after the entry point (another sink line of the method is not one)
             paths = len({c.split('  ', 1)[1].split('  CWE-')[0] if '-->' in c else '' for c in f['chains']})
@@ -88,16 +95,16 @@ def main():
                 through += f' (+{paths - 1} other path{"s" if paths > 2 else ""})'
             lines = sorted({parse(c)[5] for c in f['chains']})
             sink = f'{cls}#{method}:{",".join(map(str, lines))}'
-            sink = f'[{sink}]({links[f["key"]]})' if f['key'] in links else f'`{sink}`'
+            sink = f'[{sink}]({links[f["key"]]})' if f['key'] in links else code(sink)
             mark = '🆕' if f['key'] in new else ''
-            print(f'| {i} | {mark} | {cwe} | {cell(f"`{service}` {name}")} | {cell(sources)} | {cell(through)} '
+            print(f'| {i} | {mark} | {cwe} | {cell(f"{code(service)} {code(name)}")} | {cell(sources)} | {cell(through)} '
                   f'| {sink} | {len(f["chains"])} |')
     for title, items in (('Removed findings', r.get('removedFindings', r.get('removed'))),
                          ('Not re-checked (service failed)', r.get('unchecked'))):
         if items:
-            print(f'\n<details><summary>{title}: {len(items)}</summary>\n\n```')
-            print('\n'.join(items))
-            print('```\n</details>')
+            print(f'\n<details><summary>{title}: {len(items)}</summary>\n\n<pre>')
+            print(html.escape('\n'.join(items)))
+            print('</pre>\n</details>')
 
 
 if __name__ == '__main__':
