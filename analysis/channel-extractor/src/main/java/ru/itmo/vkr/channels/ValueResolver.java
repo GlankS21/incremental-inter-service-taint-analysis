@@ -39,6 +39,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiFunction;
 
 /**
  * Statically evaluates the set of strings an expression can take, and the type of the object it
@@ -261,15 +262,9 @@ final class ValueResolver {
             }
         }
         if (expr instanceof MethodCallExpr call) {
-            Optional<MethodDeclaration> target = sourceTarget(call);
-            if (target.isPresent() && target.get().getBody().isPresent()) {
-                MethodDeclaration method = target.get();
-                Ctx callee = new Ctx(method, bind(method, call.getArguments(), ctx), ctx, call, ctx.depth() + 1);
-                Set<String> values = new LinkedHashSet<>();
-                returns(method).forEach(r -> r.getExpression().ifPresent(e -> values.addAll(templates(e, callee))));
-                if (!values.isEmpty()) {
-                    return values;
-                }
+            Optional<Set<String>> values = returnValues(call, ctx, this::templates);
+            if (values.isPresent() && !values.get().isEmpty()) {
+                return values.get();
             }
         }
         Set<String> values = strings(expr, ctx);
@@ -394,14 +389,27 @@ final class ValueResolver {
         return index.type(typeName, field).flatMap(type -> fieldValue(type, id, ctx)).orElse(Set.of());
     }
 
-    private Set<String> call(MethodCallExpr call, Ctx ctx) {
+    /**
+     * Values of the return statements of a call whose target method has its source here, each
+     * evaluated by {@code eval} in the callee context with the arguments bound; empty when the target
+     * is not in the sources.
+     */
+    private Optional<Set<String>> returnValues(MethodCallExpr call, Ctx ctx, BiFunction<Expression, Ctx, Set<String>> eval) {
         Optional<MethodDeclaration> target = sourceTarget(call);
-        if (target.isPresent() && target.get().getBody().isPresent()) {
-            MethodDeclaration method = target.get();
-            Ctx callee = new Ctx(method, bind(method, call.getArguments(), ctx), ctx, call, ctx.depth() + 1);
-            Set<String> values = new LinkedHashSet<>();
-            returns(method).forEach(r -> r.getExpression().ifPresent(e -> values.addAll(strings(e, callee))));
-            return values;
+        if (target.isEmpty() || target.get().getBody().isEmpty()) {
+            return Optional.empty();
+        }
+        MethodDeclaration method = target.get();
+        Ctx callee = new Ctx(method, bind(method, call.getArguments(), ctx), ctx, call, ctx.depth() + 1);
+        Set<String> values = new LinkedHashSet<>();
+        returns(method).forEach(r -> r.getExpression().ifPresent(e -> values.addAll(eval.apply(e, callee))));
+        return Optional.of(values);
+    }
+
+    private Set<String> call(MethodCallExpr call, Ctx ctx) {
+        Optional<Set<String>> values = returnValues(call, ctx, this::strings);
+        if (values.isPresent()) {
+            return values.get();
         }
         Optional<Set<String>> enumGetter = enumConstantGetter(call, ctx);
         if (enumGetter.isPresent()) {

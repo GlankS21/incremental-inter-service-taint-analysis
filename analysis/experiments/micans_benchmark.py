@@ -23,8 +23,9 @@ import yaml
 
 JAVA_HOME = os.environ.get('JAVA_HOME', 'C:/Program Files/Java/jdk-24')
 TAINT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'taint')
-MICANS_JAR = os.environ.get('MICANS_JAR', 'C:/Users/asgat/OneDrive/Máy tính/WorkSpace/ITMO - Thsi/'
-                            'vkr-artifacts/miscans/src-extract/micans-source/build/micans.jar')
+MICANS_JAR = os.environ.get('VKR_MICANS_JAR') or os.environ.get('MICANS_JAR')
+if not MICANS_JAR:
+    raise SystemExit('set VKR_MICANS_JAR (or MICANS_JAR) to the Micans jar')
 # run.py of the Micans artifact drops these libraries for these systems
 EXCLUDED_LIBS = {'basemall': ('/bcprov-jdk', '/okhttp'), 'mall4cloud': ('/seata-all',)}
 # whole-system runs with the world cache (ADR-TCI-3) are written to runs-wc/, the recorded runs/ stay

@@ -3,7 +3,6 @@ package vkr.plugin;
 import pascal.taie.analysis.pta.core.cs.context.Context;
 import pascal.taie.analysis.pta.core.cs.element.CSManager;
 import pascal.taie.analysis.pta.core.cs.element.CSMethod;
-import pascal.taie.analysis.pta.core.cs.element.CSObj;
 import pascal.taie.analysis.pta.core.cs.element.CSVar;
 import pascal.taie.analysis.pta.core.solver.Solver;
 import pascal.taie.analysis.pta.plugin.Plugin;
@@ -29,7 +28,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Predicate;
 
 /**
  * Bean Validation as a sanitizer: a field annotated with {@code @Pattern} whose regular expression
@@ -66,8 +64,6 @@ public class ValidatedFieldBarrier implements Plugin {
     private static final String STRING = "java.lang.String";
     private static final String PATTERN_CLASS = "java.util.regex.Pattern";
     private static final String MATCHER_CLASS = "java.util.regex.Matcher";
-
-    private static final Predicate<CSObj> NOT_TAINT = o -> !ContainerTaint.isTaint(o);
 
     private Solver solver;
 
@@ -114,7 +110,7 @@ public class ValidatedFieldBarrier implements Plugin {
             } else if (stmt instanceof LoadField load) {
                 JField field = load.getFieldAccess().getFieldRef().resolveNullable();
                 if (field != null && validated.computeIfAbsent(field, ValidatedFieldBarrier::hasSafePattern)) {
-                    solver.addPointerFilter(csManager.getCSVar(ctx, load.getLValue()), NOT_TAINT);
+                    solver.addPointerFilter(csManager.getCSVar(ctx, load.getLValue()), ContainerTaint.NOT_TAINT);
                 }
             }
         }
@@ -130,7 +126,7 @@ public class ValidatedFieldBarrier implements Plugin {
             if (admits(constantString(exp))) {
                 // the receiver matched a regex that admits no dangerous char; on mismatch the
                 // caller throws or discards it, so no dangerous value flows past the check
-                solver.addPointerFilter(csManager.getCSVar(ctx, exp.getBase()), NOT_TAINT);
+                solver.addPointerFilter(csManager.getCSVar(ctx, exp.getBase()), ContainerTaint.NOT_TAINT);
             }
             return;
         }
@@ -146,7 +142,7 @@ public class ValidatedFieldBarrier implements Plugin {
         } else if (isMatcherMatches(callee)) {
             CSVar arg = matcherArg.get(csManager.getCSVar(ctx, exp.getBase()));
             if (arg != null) {
-                solver.addPointerFilter(arg, NOT_TAINT);
+                solver.addPointerFilter(arg, ContainerTaint.NOT_TAINT);
             }
         } else {
             filterValidatedAccessor(ctx, invoke, callee);
@@ -171,7 +167,7 @@ public class ValidatedFieldBarrier implements Plugin {
         JField field = load.getFieldAccess().getFieldRef().resolveNullable();
         if (field != null && !field.isStatic() && STRING.equals(field.getType().getName())
                 && validated.computeIfAbsent(field, ValidatedFieldBarrier::hasSafePattern)) {
-            solver.addPointerFilter(csManager.getCSVar(ctx, invoke.getResult()), NOT_TAINT);
+            solver.addPointerFilter(csManager.getCSVar(ctx, invoke.getResult()), ContainerTaint.NOT_TAINT);
         }
     }
 

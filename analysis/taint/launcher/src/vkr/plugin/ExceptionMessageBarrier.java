@@ -18,7 +18,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Predicate;
 
 /**
  * Taint is not tracked through exception objects: no field of a {@code Throwable} (detailMessage,
@@ -34,8 +33,6 @@ import java.util.function.Predicate;
  * {@code ex.getMessage()}).
  */
 public class ExceptionMessageBarrier implements Plugin {
-
-    private static final Predicate<CSObj> NOT_TAINT = o -> !ContainerTaint.isTaint(o);
 
     private Solver solver;
 
@@ -63,7 +60,7 @@ public class ExceptionMessageBarrier implements Plugin {
                     && !ContainerTaint.isTaint(obj) && filtered.add(obj)
                     && obj.getObject().getType() instanceof ClassType type) {
                 for (JField field : fields.computeIfAbsent(type.getJClass(), ExceptionMessageBarrier::instanceFields)) {
-                    solver.addPointerFilter(solver.getCSManager().getInstanceField(obj, field), NOT_TAINT);
+                    solver.addPointerFilter(solver.getCSManager().getInstanceField(obj, field), ContainerTaint.NOT_TAINT);
                 }
             }
         }

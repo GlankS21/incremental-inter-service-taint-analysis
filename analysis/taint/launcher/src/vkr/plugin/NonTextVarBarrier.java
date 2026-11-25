@@ -3,7 +3,6 @@ package vkr.plugin;
 import pascal.taie.analysis.pta.core.cs.context.Context;
 import pascal.taie.analysis.pta.core.cs.element.CSManager;
 import pascal.taie.analysis.pta.core.cs.element.CSMethod;
-import pascal.taie.analysis.pta.core.cs.element.CSObj;
 import pascal.taie.analysis.pta.core.solver.Solver;
 import pascal.taie.analysis.pta.plugin.Plugin;
 import pascal.taie.ir.exp.Var;
@@ -14,7 +13,6 @@ import pascal.taie.language.type.Type;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Predicate;
 
 /**
  * A variable of an application method declared as a number, boolean, UUID, date/time or enum holds
@@ -31,8 +29,6 @@ public class NonTextVarBarrier implements Plugin {
     private static final Set<String> NON_TEXT = Set.of("java.lang.Byte", "java.lang.Short",
             "java.lang.Integer", "java.lang.Long", "java.lang.Float", "java.lang.Double", "java.lang.Boolean",
             "java.math.BigInteger", "java.math.BigDecimal", "java.util.UUID");
-
-    private static final Predicate<CSObj> NOT_TAINT = o -> !ContainerTaint.isTaint(o);
 
     private Solver solver;
 
@@ -55,7 +51,7 @@ public class NonTextVarBarrier implements Plugin {
         Context ctx = csMethod.getContext();
         for (Var var : method.getIR().getVars()) {
             if (nonText.computeIfAbsent(var.getType(), NonTextVarBarrier::isNonText)) {
-                solver.addPointerFilter(csManager.getCSVar(ctx, var), NOT_TAINT);
+                solver.addPointerFilter(csManager.getCSVar(ctx, var), ContainerTaint.NOT_TAINT);
             }
         }
     }

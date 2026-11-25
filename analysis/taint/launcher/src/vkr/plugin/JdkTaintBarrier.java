@@ -1,17 +1,11 @@
 package vkr.plugin;
 
-import pascal.taie.analysis.pta.core.cs.context.Context;
-import pascal.taie.analysis.pta.core.cs.element.CSManager;
 import pascal.taie.analysis.pta.core.cs.element.CSMethod;
-import pascal.taie.analysis.pta.core.cs.element.CSObj;
 import pascal.taie.analysis.pta.core.solver.Solver;
 import pascal.taie.analysis.pta.plugin.Plugin;
-import pascal.taie.ir.IR;
-import pascal.taie.ir.exp.Var;
 import pascal.taie.language.classes.JMethod;
 
 import java.util.List;
-import java.util.function.Predicate;
 
 /**
  * Keeps taint objects out of the JDK collection, stream and number code ({@code java.util.*},
@@ -30,16 +24,11 @@ public class JdkTaintBarrier implements Plugin {
     /** java.math: BigDecimal arithmetic returns `this` or shared constants through internal helpers */
     private static final List<String> BEHIND_BARRIER = List.of("java.util.", "java.math.");
 
-    private static final Predicate<CSObj> NOT_TAINT = o -> !ContainerTaint.isTaint(o);
-
     private Solver solver;
-
-    private CSManager csManager;
 
     @Override
     public void setSolver(Solver solver) {
         this.solver = solver;
-        this.csManager = solver.getCSManager();
     }
 
     @Override
@@ -50,13 +39,6 @@ public class JdkTaintBarrier implements Plugin {
                 || method.isAbstract() || method.isNative()) {
             return;
         }
-        Context ctx = csMethod.getContext();
-        IR ir = method.getIR();
-        if (ir.getThis() != null) {
-            solver.addPointerFilter(csManager.getCSVar(ctx, ir.getThis()), NOT_TAINT);
-        }
-        for (Var param : ir.getParams()) {
-            solver.addPointerFilter(csManager.getCSVar(ctx, param), NOT_TAINT);
-        }
+        ContainerTaint.keepTaintOut(solver, csMethod);
     }
 }

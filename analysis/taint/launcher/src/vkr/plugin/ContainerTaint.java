@@ -9,6 +9,7 @@ import pascal.taie.analysis.pta.core.heap.MockObj;
 import pascal.taie.analysis.pta.core.solver.Solver;
 import pascal.taie.analysis.pta.plugin.Plugin;
 import pascal.taie.analysis.pta.pts.PointsToSet;
+import pascal.taie.ir.IR;
 import pascal.taie.ir.exp.InvokeInstanceExp;
 import pascal.taie.ir.exp.Var;
 import pascal.taie.ir.proginfo.MethodRef;
@@ -23,6 +24,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /**
  * Object-level taint for JDK containers.
@@ -197,6 +199,22 @@ public class ContainerTaint implements Plugin {
         return obj.getObject().getContainerMethod()
                 .map(m -> m.getDeclaringClass().isApplication())
                 .orElse(false);
+    }
+
+    /** the pointer filter of the barriers: no taint object passes */
+    static final Predicate<CSObj> NOT_TAINT = o -> !isTaint(o);
+
+    /** keeps taint objects out of a method in its context: from {@code this} and every parameter */
+    static void keepTaintOut(Solver solver, CSMethod csMethod) {
+        CSManager csManager = solver.getCSManager();
+        Context ctx = csMethod.getContext();
+        IR ir = csMethod.getMethod().getIR();
+        if (ir.getThis() != null) {
+            solver.addPointerFilter(csManager.getCSVar(ctx, ir.getThis()), NOT_TAINT);
+        }
+        for (Var param : ir.getParams()) {
+            solver.addPointerFilter(csManager.getCSVar(ctx, param), NOT_TAINT);
+        }
     }
 
     static boolean isTaint(CSObj obj) {
