@@ -246,9 +246,12 @@ decoding text that the Spring services do not need.
   - A chain is a candidate, not a proof.
   - The points-to analysis is flow-insensitive. Code behind an `if` or `switch` whose condition
     is constant inside the method (`int num = 86; if ((7 * 42) - num > 200)`, `"ABC".charAt(1)`)
-    is dropped before the analysis (`vkr.plugin.ConstantBranches`). Other value-dependent code is
-    not: a list element taken at another index or a map value read under another key still
-    carries the taint.
+    is dropped before the analysis (`vkr.plugin.ConstantBranches`).
+  - Containers: map values are kept apart by key when the key is a string constant
+    (`put("a", v)` then `get("b")` is not a flow), and the elements of a list that a method builds
+    and reads in straight-line code with constant indexes (`add`, `remove(0)`, `get(1)`) are kept
+    apart by position (`vkr.plugin.ContainerTaint`, `LocalLists`). Any other map or list read
+    returns everything stored in the container.
   - On the testbed's seeded set, the sanitised negatives are not reported.
   - On public systems, false positives were found and fixed per case.
 
