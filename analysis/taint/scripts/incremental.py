@@ -160,7 +160,7 @@ def sh(*args, **kw):
 def compile_launcher():
     src = os.path.join(T, 'launcher', 'src')
     files = [os.path.join(d, f) for d, _, fs in os.walk(os.path.join(src, 'vkr')) for f in fs if f.endswith('.java')]
-    subprocess.run([os.path.join(CFG['toolchain']['java_home'], 'bin', 'javac'), '--release', '17', '-nowarn',
+    subprocess.run([os.path.join(CFG['toolchain']['java_home'], 'bin', 'javac'), '--release', '17', '-encoding', 'UTF-8', '-nowarn',
                     '-cp', CFG['toolchain']['micans_jar'], '-d', os.path.join(T, 'launcher', 'classes'), *files],
                    check=True)
 

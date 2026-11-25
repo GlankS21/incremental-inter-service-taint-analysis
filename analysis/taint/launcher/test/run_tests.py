@@ -46,7 +46,7 @@ def main():
     out = os.path.join(os.path.dirname(HERE), 'classes-test')
     src = glob.glob(os.path.join(SRC, '**', '*.java'), recursive=True)
     tests = glob.glob(os.path.join(HERE, '**', '*.java'), recursive=True)
-    subprocess.run([os.path.join(JAVA_HOME, 'bin', 'javac'), '--release', '17', '-nowarn',
+    subprocess.run([os.path.join(JAVA_HOME, 'bin', 'javac'), '--release', '17', '-encoding', 'UTF-8', '-nowarn',
                     '-cp', jar + os.pathsep + MICANS_JAR, '-d', out, *src, *tests], check=True)
     code = subprocess.run([os.path.join(JAVA_HOME, 'bin', 'java'), '-cp',
                            out + os.pathsep + jar + os.pathsep + MICANS_JAR, 'RunTests']).returncode
