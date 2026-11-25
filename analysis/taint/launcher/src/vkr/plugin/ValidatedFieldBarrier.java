@@ -59,7 +59,7 @@ public class ValidatedFieldBarrier implements Plugin {
             "javax.validation.constraints.Pattern"};
 
     /** quotes, backslash, statement separator, line breaks */
-    private static final String DANGEROUS = "'\"`\\;\r\n\u0085  ";
+    private static final String DANGEROUS = "'\"`\\;\r\n\u0085\u2028\u2029";
 
     private static final String STRING = "java.lang.String";
     private static final String PATTERN_CLASS = "java.util.regex.Pattern";
