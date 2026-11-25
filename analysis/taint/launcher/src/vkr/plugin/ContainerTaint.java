@@ -69,7 +69,7 @@ public class ContainerTaint implements Plugin {
     }
 
     /** a read into {@code result}; {@code key} null reads everything, else that key and the unknown ones */
-    private record Read(CSVar result, String key) {
+    record Read(CSVar result, String key) {
 
         boolean sees(String stored) {
             return key == null || stored == null || key.equals(stored);
@@ -159,7 +159,7 @@ public class ContainerTaint implements Plugin {
     }
 
     /** the first argument when it is a string constant, else null */
-    private static String constantKey(InvokeInstanceExp exp) {
+    static String constantKey(InvokeInstanceExp exp) {
         if (exp.getArgCount() == 0) {
             return null;
         }
