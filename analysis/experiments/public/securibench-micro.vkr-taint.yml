@@ -1,0 +1,25 @@
+# vkr-taint configuration of Securibench Micro (too4words/securibench-micro @ 6a5a724, servlets).
+# Built without its ant build: the sources (all but basic/Basic40, which needs com.oreilly cos.jar) compiled
+# with javac --release 11 -g against javax.servlet-api 3.1.0 into VKR_PUBLIC_BUILD/securibench-micro/
+# target/classes, packed as target/securibench-micro.war (WEB-INF/classes), with the sources copied to
+# src/main/java and a pom.xml declaring a war with the servlet API as provided.
+# Score: securibench_score.py <report> <securibench-micro/src> --exclude Basic40
+version: 1
+project:
+  root: ${VKR_PUBLIC_BUILD:-${VKR_EXP}/build}/securibench-micro
+  gateway-config: auto
+services: auto
+shared: auto
+taint:
+  sinks: [cwe-89, cwe-79, cwe-78, cwe-22]
+  sources: auto
+  discovery: annotations
+analysis:
+  context: 1-call
+  heap: ${VKR_HEAP:-24g}
+  world-cache: ${VKR_WORLD_CACHE:-off}
+toolchain:
+  java-home: ${JAVA_HOME}
+  micans-jar: ${VKR_MICANS_JAR:-${MICANS_JAR}}
+gate:
+  fail-on: none
