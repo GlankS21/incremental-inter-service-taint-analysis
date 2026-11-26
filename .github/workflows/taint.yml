@@ -1,12 +1,12 @@
 # Incremental inter-service taint analysis of the testbed (ecommerce/backend) with the vkr-taint action
 # of this repository (action.yml): only services whose analysis inputs changed are re-analysed, the
-# chains to a sink go to code scanning, and a pull request fails when it adds a chain that the master
+# chains to a sink go to code scanning, and a pull request fails when it adds a chain that the main
 # baseline does not have. Runs on a GitHub-hosted runner; the analysis cache is kept in the Actions cache.
 name: Taint analysis
 
 on:
   push:
-    branches: [master]
+    branches: [main]
     paths: [ecommerce/backend/**, analysis/**, action.yml, .github/workflows/taint.yml]
   pull_request:
     paths: [ecommerce/backend/**, analysis/**, action.yml, .github/workflows/taint.yml]

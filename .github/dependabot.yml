@@ -1,0 +1,18 @@
+# Version updates of the tool's own dependencies (the ecommerce testbed is left as it is: its
+# versions are part of the experiments). Actions are pinned to SHAs; Dependabot bumps the SHA and
+# the version comment together.
+version: 2
+updates:
+  - package-ecosystem: github-actions   # .github/workflows and action.yml
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      actions: { patterns: ["*"] }
+  - package-ecosystem: maven
+    directory: /analysis/channel-extractor
+    schedule: { interval: weekly }
+    groups:
+      channel-extractor: { patterns: ["*"] }
+  - package-ecosystem: docker
+    directory: /analysis
+    schedule: { interval: weekly }

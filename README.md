@@ -37,7 +37,7 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21', cache: maven }
       - run: ./mvnw -B -DskipTests package
-      - uses: GlankS21/web-project@v1
+      - uses: GlankS21/incremental-inter-service-taint-analysis@v1
         with:
           path: .                 # the Maven multi-module root
 ```
@@ -86,5 +86,7 @@ runs the action on the testbed in this repository.
 - [`ecommerce/`](ecommerce): the microservice testbed that the method was evaluated on.
 
 ## Licence
+
+This repository is licensed under the [GNU Affero General Public License v3.0](LICENSE).
 
 The image builds [Micans](https://doi.org/10.5281/zenodo.15050505), which is licensed AGPL-3.0, from its published source during the action run. The Micans source and jar are not part of this repository.
