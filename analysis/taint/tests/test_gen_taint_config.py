@@ -315,5 +315,19 @@ class GenerateTest(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(out, 'discovery-svc-a.json')))
 
 
+
+class RootPackagesTest(unittest.TestCase):
+    def test_common_package(self):
+        self.assertEqual(gen.root_packages(['com.shop.a.A', 'com.shop.b.B']), ['com.shop'])
+
+    def test_several_roots(self):
+        # Juliet: testcases.* and juliet.support.* share no package; both are the application's
+        self.assertEqual(gen.root_packages(['testcases.CWE89.X', 'juliet.support.IO', 'Top']),
+                         ['juliet', 'testcases'])
+
+    def test_no_package(self):
+        self.assertEqual(gen.root_packages(['Top']), [])
+
+
 if __name__ == '__main__':
     unittest.main()

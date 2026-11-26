@@ -18,6 +18,7 @@ import pascal.taie.ir.stmt.Invoke;
 import pascal.taie.language.classes.ClassHierarchy;
 import pascal.taie.language.classes.JClass;
 import pascal.taie.language.classes.JMethod;
+import pascal.taie.language.type.PrimitiveType;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -54,9 +55,12 @@ public class ContainerTaint implements Plugin {
     private static final Map<String, int[]> MAP_WRITES = Map.of(
             "put", new int[]{0, 1}, "putIfAbsent", new int[]{0, 1}, "merge", new int[]{0, 1});
 
+    /** reads returning an element or a view of them; remove(Object) returns a boolean, see register */
     private static final Set<String> COLLECTION_READS = Set.of(
             "iterator", "listIterator", "stream", "parallelStream", "get", "getFirst", "getLast",
-            "peek", "poll", "pop", "element", "toArray");
+            "peek", "poll", "pop", "element", "toArray", "remove", "removeFirst", "removeLast",
+            "pollFirst", "pollLast", "peekFirst", "peekLast", "take", "elementAt", "firstElement",
+            "lastElement");
 
     private static final Set<String> MAP_READS = Set.of(
             "keySet", "values", "entrySet", "get", "getOrDefault", "sequencedKeySet", "sequencedValues");
@@ -150,7 +154,8 @@ public class ContainerTaint implements Plugin {
             }
         }
         Var result = invoke.getResult();
-        if (result != null && (isMap ? MAP_READS : COLLECTION_READS).contains(name)) {
+        if (result != null && !(result.getType() instanceof PrimitiveType)
+                && (isMap ? MAP_READS : COLLECTION_READS).contains(name)) {
             String key = isMap ? (KEYED_READS.contains(name) ? constantKey(exp) : null) : lists.get(invoke);
             Read r = new Read(csManager.getCSVar(ctx, result), key);
             readsByBase.computeIfAbsent(base, k -> new ArrayList<>()).add(r);

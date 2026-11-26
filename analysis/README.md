@@ -215,13 +215,22 @@ is in the report.
 
 A module packaged as a war whose classes extend `HttpServlet` (javax or jakarta), without Spring
 request mappings, is a service as well. Its `doGet`/`doPost`/... methods are the entry points
-(`vkr.plugin.ServletEntryPoints`), the request getters (`getParameter`, `getParameterValues`,
-`getParameterMap`, `getParameterNames`, `getHeader`, `getHeaders`, `getHeaderNames`, `getQueryString`,
-`Cookie.getValue`) are the sources, and a finding names `Servlet#doPost`. The libraries are read from
-`WEB-INF/lib`. The Servlet API is usually not packaged (scope `provided`): the analysis then uses the
-signature-only stubs in [`taint/servlet-stubs`](taint/servlet-stubs). Servlet code handles raw request
-strings, so a servlet application also gets JDK transfers for splitting, replacing, encoding and
-decoding text that the Spring services do not need.
+(`vkr.plugin.ServletEntryPoints`), also when a servlet inherits them from an abstract base class of
+the application. The sources are what the client controls:
+- the parameters, headers and query string (`getParameter`, `getParameterValues`, `getParameterMap`,
+  `getParameterNames`, `getHeader`, `getHeaders`, `getHeaderNames`, `getQueryString`);
+- the path (`getRequestURI`, `getRequestURL`, `getPathInfo`, `getPathTranslated`) and `getRemoteUser`;
+- the body (`getReader`, `getInputStream`);
+- the cookies (`Cookie.getValue`, `getName`, `getComment`, `getDomain`, `getPath`).
+
+Values the server or the container decides (`getScheme`, `getProtocol`, `getMethod`, `getAuthType`,
+`getServletPath`, `getContextPath`, `getInitParameter`) are not sources. A taint of a `String[]` or
+`Map` value is also a taint of its elements. A finding names `Servlet#doPost`. The libraries are read
+from `WEB-INF/lib`. The Servlet API is usually not packaged (scope `provided`): the analysis then uses
+the signature-only stubs in [`taint/servlet-stubs`](taint/servlet-stubs). Servlet code handles raw
+request strings, so a servlet application also gets JDK transfers for splitting, tokenizing,
+replacing, encoding and decoding text and for reading the body, which the Spring services do not
+need.
 
 ## Limits
 
@@ -254,15 +263,29 @@ decoding text that the Spring services do not need.
     returns everything stored in the container.
   - On the testbed's seeded set, the sanitised negatives are not reported.
   - On public systems, false positives were found and fixed per case.
-  - Securibench Micro, run once with no change to the tool
-    ([`securibench-micro.vkr-taint.yml`](experiments/public/securibench-micro.vkr-taint.yml),
-    scored by [`securibench_score.py`](experiments/public/securibench_score.py), per statement in
-    [`results/securibench-micro-per-statement.csv`](experiments/public/results/securibench-micro-per-statement.csv)):
-    103 of 133 `/* BAD */` statements found (recall 77.4 %), 14 false sinks (precision 88.0 %).
-    Misses include reflection (4), session attributes (3), `StringTokenizer` and request metadata such as
-    `getProtocol` (not sources), maps read through iterators or `entrySet`. False positives: array
-    elements are not kept apart by index, and a field write does not overwrite the earlier one.
-
+  - Public suites, scored per test case and checked by a regression gate
+    ([`precision_gate.py`](experiments/public/precision_gate.py)): a change to the analysis may not
+    lose a true positive or add a false positive in any category of any suite against
+    [`results/gate-baseline.json`](experiments/public/results/gate-baseline.json).
+    - OWASP BenchmarkJava (sqli, xss, cmdi, pathtraver): TPR 96.5 %, FPR 0.0 %.
+    - Securibench Micro ([`securibench-micro.vkr-taint.yml`](experiments/public/securibench-micro.vkr-taint.yml),
+      [`securibench_score.py`](experiments/public/securibench_score.py),
+      [`results/securibench-micro-per-statement.csv`](experiments/public/results/securibench-micro-per-statement.csv)):
+      111 of 133 `/* BAD */` statements found (recall 83.5 %), 14 false sinks (precision 88.8 %).
+      Misses include reflection (4), session attributes (3), `getInitParameter` and request
+      metadata such as `getProtocol` (not sources), maps read through iterators or `entrySet`. False
+      positives: array elements are not kept apart by index, and a field write does not overwrite
+      the earlier one.
+    - Juliet Java 1.3, the 1332 servlet test cases of CWE 23, 36, 78, 80, 81, 83 and 89
+      ([`build_juliet.py`](experiments/public/build_juliet.py),
+      [`juliet_score.py`](experiments/public/juliet_score.py),
+      [`results/juliet-per-flow.csv`](experiments/public/results/juliet-per-flow.csv)): 1188 found
+      (recall 89.2 %), 33 of 2622 good flows reported (1.3 %). Misses: CWE81 (111), whose sink
+      `sendError` is in no catalogue because Tomcat and Jetty escape the message, and data passed
+      through Java serialization (33). The false positives are flow variant 68: the bad and the
+      good flow share one static field, and the analysis does not order its write and read.
+      Three generic gaps were found on this suite and fixed (entry points inherited from a base
+      class, `StringTokenizer`, `List.remove(int)`), so these numbers are not an unseen-data result.
 ## Micans
 
 Micans (Zhang et al., *Bridge the Islands: Pointer Analysis for Microservice Systems*, artifact

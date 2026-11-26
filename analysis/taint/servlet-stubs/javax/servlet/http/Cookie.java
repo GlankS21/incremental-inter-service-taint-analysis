@@ -4,6 +4,8 @@ public class Cookie implements Cloneable, java.io.Serializable {
     private final String name;
     private String value;
     private String path;
+    private String domain;
+    private String comment;
     private int maxAge = -1;
     private boolean secure;
     private boolean httpOnly;
@@ -34,6 +36,19 @@ public class Cookie implements Cloneable, java.io.Serializable {
     }
 
     public void setDomain(String domain) {
+        this.domain = domain;
+    }
+
+    public String getDomain() {
+        return domain;
+    }
+
+    public void setComment(String purpose) {
+        comment = purpose;
+    }
+
+    public String getComment() {
+        return comment;
     }
 
     public void setMaxAge(int expiry) {

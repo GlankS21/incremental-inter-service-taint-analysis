@@ -191,8 +191,24 @@ SERVLET_SOURCES = [
     ('{ns}.servlet.http.HttpServletRequest', 'java.util.Enumeration getHeaders(java.lang.String)', None),
     ('{ns}.servlet.http.HttpServletRequest', 'java.util.Enumeration getHeaderNames()', None),
     ('{ns}.servlet.http.HttpServletRequest', 'java.lang.String getQueryString()', None),
-    ('{ns}.servlet.http.Cookie', 'java.lang.String getValue()', None),  # cookies of the request
+    # the request line and the authenticated user name: text the client chooses
+    ('{ns}.servlet.http.HttpServletRequest', 'java.lang.String getRequestURI()', None),
+    ('{ns}.servlet.http.HttpServletRequest', 'java.lang.StringBuffer getRequestURL()', None),
+    ('{ns}.servlet.http.HttpServletRequest', 'java.lang.String getPathInfo()', None),
+    ('{ns}.servlet.http.HttpServletRequest', 'java.lang.String getPathTranslated()', None),
+    ('{ns}.servlet.http.HttpServletRequest', 'java.lang.String getRemoteUser()', None),
+    # the request body
+    ('{ns}.servlet.ServletRequest', 'java.io.BufferedReader getReader()', None),
+    ('{ns}.servlet.ServletRequest', '{ns}.servlet.ServletInputStream getInputStream()', None),
+    # cookies of the request: every attribute the client sends
+    ('{ns}.servlet.http.Cookie', 'java.lang.String getValue()', None),
+    ('{ns}.servlet.http.Cookie', 'java.lang.String getName()', None),
+    ('{ns}.servlet.http.Cookie', 'java.lang.String getComment()', None),
+    ('{ns}.servlet.http.Cookie', 'java.lang.String getDomain()', None),
+    ('{ns}.servlet.http.Cookie', 'java.lang.String getPath()', None),
 ]
+# Not sources: values the container restricts to a few constants or that the deployment sets
+# (getScheme, getProtocol, getMethod, getAuthType, getServletPath, getContextPath, getInitParameter).
 # the text a servlet writes to its response writer (CWE-79)
 SERVLET_SINKS = [
     {'method': f'<java.io.PrintWriter: {sig}>', 'index': i} for sig, i in [
@@ -258,6 +274,13 @@ SERVLET_TRANSFERS = [
         ('<java.lang.StringBuilder: void <init>(java.lang.String)>', 0, 'base'),
         ('<java.lang.StringBuilder: void <init>(java.lang.CharSequence)>', 0, 'base'),
         ('<java.lang.StringBuffer: void <init>(java.lang.String)>', 0, 'base'),
+        # a query string parsed by hand: new StringTokenizer(request.getQueryString(), "&").nextToken()
+        ('<java.util.StringTokenizer: void <init>(java.lang.String)>', 0, 'base'),
+        ('<java.util.StringTokenizer: void <init>(java.lang.String,java.lang.String)>', 0, 'base'),
+        ('<java.util.StringTokenizer: void <init>(java.lang.String,java.lang.String,boolean)>', 0, 'base'),
+        ('<java.util.StringTokenizer: java.lang.String nextToken()>', 'base', 'result'),
+        ('<java.util.StringTokenizer: java.lang.String nextToken(java.lang.String)>', 'base', 'result'),
+        ('<java.util.StringTokenizer: java.lang.Object nextElement()>', 'base', 'result', 'java.lang.String'),
         ('<java.lang.AbstractStringBuilder^: * insert(int,java.lang.String)>', 1, 'base'),
         ('<java.lang.StringBuilder: java.lang.StringBuilder append(char[])>', 0, 'base'),
         ('<java.lang.StringBuffer: java.lang.StringBuffer append(char[])>', 0, 'base'),
@@ -269,6 +292,13 @@ SERVLET_TRANSFERS = [
         ('<java.lang.AbstractStringBuilder^: * reverse()>', 'base', 'result'),
         ('<java.lang.AbstractStringBuilder^: * append(java.lang.Object^)>', 'base', 'result'),
         ('<java.lang.AbstractStringBuilder^: * append(java.lang.String)>', 'base', 'result'),
+    ]),
+    ('readers of the request body', [
+        ('<java.io.InputStreamReader: void <init>(java.io.InputStream)>', 0, 'base'),
+        ('<java.io.InputStreamReader: void <init>(java.io.InputStream,java.lang.String)>', 0, 'base'),
+        ('<java.io.InputStreamReader: void <init>(java.io.InputStream,java.nio.charset.Charset)>', 0, 'base'),
+        ('<java.io.BufferedReader: void <init>(java.io.Reader)>', 0, 'base'),
+        ('<java.io.BufferedReader: java.lang.String readLine()>', 'base', 'result'),
     ]),
     ('decoders and encoders that keep the attacker text', [
         ('<java.net.URLDecoder: java.lang.String decode(java.lang.String,java.lang.String)>', 0, 'result'),
@@ -534,6 +564,15 @@ def common_package(names):
     return '.'.join(first[:k])
 
 
+def root_packages(names):
+    """The packages that hold the given classes: their common package, else (classes under several
+    roots, e.g. Juliet's testcases.* and juliet.support.*) each top-level package."""
+    common = common_package(names)
+    if common:
+        return [common]
+    return sorted({n.split('.', 1)[0] for n in names if '.' in n})
+
+
 def pkg(cls):
     return cls.rsplit('.', 1)[0]
 
@@ -705,7 +744,7 @@ def generate(cfg, model, module, java_home):
                 if (t in svc.app_classes or t in svc.shared_classes) and not t.endswith('[]'):
                     dto_classes.add(t)
     servlet_ns = svc.servlet_namespaces()
-    servlet_sources = [{'kind': 'call', 'method': f'<{cls.format(ns=ns)}: {sig}>', 'index': 'result',
+    servlet_sources = [{'kind': 'call', 'method': f'<{cls.format(ns=ns)}: {sig.format(ns=ns)}>', 'index': 'result',
                         **({'type': t} if t else {})}
                        for ns in servlet_ns for cls, sig, t in SERVLET_SOURCES]
     if servlet_ns:
@@ -893,8 +932,8 @@ def generate(cfg, model, module, java_home):
     if 'cwe-79' in cfg['taint']['sinks']:
         # also makes the run key differ: the plugin is not part of the YAML
         lines += ['', '# response-body sinks (CWE-79): vkr.plugin.ResponseBodySink']
-    app_packages = sorted({p for p in [common_package(svc.app_classes)]
-                           + [common_package(class_files(d)) for d in svc.shared] if p})
+    app_packages = sorted({p for names in [svc.app_classes] + [class_files(d) for d in svc.shared]
+                           for p in root_packages(names)})
     discovery = {'service': name, 'appPackages': app_packages, 'dtoPackages': dto_packages,
                  'dtoClasses': sorted(dto_classes), 'eventPackages': event_packages, 'eventClasses': event_classes,
                  'entityPackages': entity_packages, 'entityClasses': entity_classes,

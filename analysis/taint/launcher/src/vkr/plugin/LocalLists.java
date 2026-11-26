@@ -26,7 +26,8 @@ import java.util.Set;
  * indexes (and {@code size}, {@code isEmpty}), never copied, passed, stored or returned, and no jump,
  * return, throw or exception handler lies inside the code from its allocation to its last use. The
  * statements then run in order, so the element each {@code get} returns is known: both that
- * {@code get} and the {@code add} of the element get the same key. Any other list keeps no keys.
+ * {@code get} (or {@code remove(i)}) and the {@code add} of the element get the same key. Any other list
+ * keeps no keys.
  */
 final class LocalLists {
 
@@ -37,7 +38,7 @@ final class LocalLists {
     private LocalLists() {
     }
 
-    /** key of each add and get of a handled list in {@code ir} */
+    /** key of each add, get and remove of a handled list in {@code ir} */
     static Map<Invoke, String> keys(IR ir) {
         Map<Invoke, String> keys = new HashMap<>();
         for (Stmt s : ir.getStmts()) {
@@ -81,7 +82,11 @@ final class LocalLists {
                     if (i >= elements.size()) {
                         return;
                     }
-                    elements.remove(i);
+                    // the removed element is what remove(i) returns: both get the key of its add
+                    Invoke removed = elements.remove(i);
+                    String key = "#" + removed.getIndex();
+                    found.put(removed, key);
+                    found.put(op, key);
                 }
                 case "get" -> {
                     int i = constIndex(exp);
