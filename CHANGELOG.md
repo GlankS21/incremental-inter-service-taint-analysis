@@ -5,6 +5,10 @@
 DeltaTaint 1.2.0 keeps container elements apart, makes the analysis cache small, and reruns a
 service only for the configuration it is given.
 
+### Licence
+- The repository is licensed under AGPL-3.0, the licence of Micans, which the tool patches and
+  runs.
+
 ### Improved
 - **Containers.** Map values are kept apart by key when the key is a string constant
   (`put("a", v)` then `get("b")` is not a flow). Elements of a list that a method builds and reads

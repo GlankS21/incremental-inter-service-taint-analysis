@@ -87,4 +87,6 @@ runs the action on the testbed in this repository.
 
 ## Licence
 
+This repository is licensed under the [GNU Affero General Public License v3.0](LICENSE).
+
 The image builds [Micans](https://doi.org/10.5281/zenodo.15050505), which is licensed AGPL-3.0, from its published source during the action run. The Micans source and jar are not part of this repository.
