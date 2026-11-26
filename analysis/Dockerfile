@@ -5,7 +5,7 @@
 # patches of taint/patches; neither the source nor the jar is part of this repository.
 
 # --- Micans from source (its Gradle toolchain is Java 17)
-FROM eclipse-temurin:17-jdk AS micans
+FROM eclipse-temurin:25-jdk AS micans
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends xz-utils patch curl > /dev/null \
     && rm -rf /var/lib/apt/lists/*
 # only what the build reads, so editing the patch notes does not rebuild Micans
@@ -19,7 +19,7 @@ RUN cd /build && mvn -B -q -ntp -DskipTests package \
     && cp target/channel-extractor-0.1.0-SNAPSHOT.jar /out.jar
 
 # --- runtime: JDK 24 runs Micans; the JRE model is built once into the image
-FROM eclipse-temurin:24-jdk
+FROM eclipse-temurin:25-jdk
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends python3 unzip git > /dev/null \
     && rm -rf /var/lib/apt/lists/*
 COPY . /opt/vkr
