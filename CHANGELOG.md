@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.3.0
 
-More of what a client sends is a source in a servlet application, and a regression gate on three
-public suites guards every change to the analysis.
+DeltaTaint 1.3.0 reads more of what a client sends to a servlet application, no longer loses the
+findings of an application whose classes share no package, and guards every change to the
+analysis with a regression gate on three public suites.
 
 ### Improved
 - **Servlet sources.** The request path (`getRequestURI`, `getRequestURL`, `getPathInfo`,
@@ -31,6 +32,19 @@ public suites guards every change to the analysis.
 - Securibench Micro: 111 of 133 statements (recall 83.5 %, from 77.4 %), precision 88.8 %.
 - Juliet Java 1.3, 1332 servlet test cases: recall 89.2 %, 33 of 2622 good flows reported (1.3 %).
   Missed: CWE81 `sendError` (not a sink: containers escape it) and Java serialization.
+  The fixes above were found on this suite, so its numbers are not an unseen-data result.
+- Testbed: unchanged. All 6 seeded vulnerabilities are found and none of the 4 negatives is
+  reported; the base commit gives 4 findings and 16 chains (6 across a channel), as in 1.2.0.
+
+### Upgrading
+- `uses: GlankS21/incremental-inter-service-taint-analysis@v1` now gives this release. Pin
+  `@v1.3.0` for a fixed version.
+- The analysis changes, so every run key changes. The first run after upgrading is a full
+  analysis, about 4–6 minutes per service on a hosted runner; later runs reuse the cache as before.
+- A Spring service can get new findings only where application code reads a tainted list element
+  with `remove`, `poll...`, `peek...` or `elementAt` (the testbed's are unchanged). A servlet
+  application may get more: new sources, inherited handlers and, for an application under several
+  top-level packages, findings that 1.2.0 dropped.
 
 ## 1.2.0
 
