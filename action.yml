@@ -56,10 +56,13 @@ runs:
         cache-from: type=gha,scope=vkr-taint-image
         cache-to: type=gha,mode=max,scope=vkr-taint-image
 
-    # analysis cache: content-addressed inside, so the newest one of any earlier run is safe to reuse
-    - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+    # analysis cache: the run and summary results only (work/cache, content-addressed, about 1 MB a
+    # service), so the newest one of any earlier run is safe to reuse; the per-service workdirs
+    # (classes and library jars, hundreds of MB) are rebuilt from the build output in seconds
+    - id: cache
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
-        path: ${{ runner.temp }}/vkr-cache
+        path: ${{ runner.temp }}/vkr-cache/cache
         key: vkr-taint-cache-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: vkr-taint-cache-
     - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -99,6 +102,11 @@ runs:
         # the container runs as root: give the runner user the files the next steps read and cache
         sudo chown -R "$(id -u):$(id -g)" "$out" "$RUNNER_TEMP/vkr-cache"
         echo "code=$code" >> "$GITHUB_OUTPUT"
+        # keyed by the cached entries: a run that adds none saves nothing
+        if [ -d "$RUNNER_TEMP/vkr-cache/cache" ]; then
+          key=$(cd "$RUNNER_TEMP/vkr-cache/cache" && find . -type f | LC_ALL=C sort | sha256sum | cut -c1-16)
+          echo "cache-key=vkr-taint-cache-$key" >> "$GITHUB_OUTPUT"
+        fi
         echo "sarif=$out/vkr-taint.sarif" >> "$GITHUB_OUTPUT"
         [ -f "$out/vkr-taint.sarif" ] && echo "has-sarif=true" >> "$GITHUB_OUTPUT"
         if [ -f "$out/vkr-taint-report.json" ]; then
@@ -115,10 +123,10 @@ runs:
         fi
 
     - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-      if: always() && steps.run.outputs.code != ''
+      if: always() && steps.run.outputs.cache-key != '' && steps.run.outputs.cache-key != steps.cache.outputs.cache-matched-key
       with:
-        path: ${{ runner.temp }}/vkr-cache
-        key: vkr-taint-cache-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/vkr-cache/cache
+        key: ${{ steps.run.outputs.cache-key }}
 
     # saved from the path that pull requests restore it to: a cache is found only under the same path
     - name: Store the baseline
