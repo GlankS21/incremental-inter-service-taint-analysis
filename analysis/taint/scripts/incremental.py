@@ -103,8 +103,9 @@ def run_key(svc, base, discovery):
     # the base config is generated from the channel model: its text, not the model, is the input
     h.file('config', base)
     h.file('discovery', discovery)
-    if CFG['taint']['overrides']:
-        h.file('overrides', CFG['taint']['overrides'])
+    # the overrides this service is given (common ones, its own, exclusions, helpers), not the file:
+    # an entry for another service reruns nothing here
+    h.part('overrides', json.dumps(vkr_prepare.overrides_for(CFG, svc), sort_keys=True).encode())
     for s in CONFIG_SCRIPTS:
         h.file(s, os.path.join(T, 'scripts', s))
     h.tree('launcher', os.path.join(T, 'launcher', 'src'), '.java')

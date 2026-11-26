@@ -173,7 +173,7 @@ The default is `[cwe-89, cwe-117]`. List the other catalogues in `taint.sinks` t
 
 Examples: [`taint/config/ecommerce.vkr-taint.yml`](taint/config/ecommerce.vkr-taint.yml) (the
 testbed); [`experiments/public/*.vkr-taint.yml`](experiments/public) (train-ticket, mall-swarm,
-OWASP BenchmarkJava).
+OWASP BenchmarkJava, Securibench Micro).
 
 ## Output
 
@@ -254,6 +254,14 @@ decoding text that the Spring services do not need.
     returns everything stored in the container.
   - On the testbed's seeded set, the sanitised negatives are not reported.
   - On public systems, false positives were found and fixed per case.
+  - Securibench Micro, run once with no change to the tool
+    ([`securibench-micro.vkr-taint.yml`](experiments/public/securibench-micro.vkr-taint.yml),
+    scored by [`securibench_score.py`](experiments/public/securibench_score.py), per statement in
+    [`results/securibench-micro-per-statement.csv`](experiments/public/results/securibench-micro-per-statement.csv)):
+    103 of 133 `/* BAD */` statements found (recall 77.4 %), 14 false sinks (precision 88.0 %).
+    Misses include reflection (4), session attributes (3), `StringTokenizer` and request metadata such as
+    `getProtocol` (not sources), maps read through iterators or `entrySet`. False positives: array
+    elements are not kept apart by index, and a field write does not overwrite the earlier one.
 
 ## Micans
 

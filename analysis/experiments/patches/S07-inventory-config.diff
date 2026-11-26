@@ -1,12 +1,14 @@
-diff --git a/taint/config/taint-inventory.yml b/taint/config/taint-inventory.yml
-index b01d7b2..0781920 100644
---- a/taint/config/taint-inventory.yml
-+++ b/taint/config/taint-inventory.yml
-@@ -31,6 +31,7 @@ sinks:
-   - { method: "<org.springframework.jdbc.core.JdbcTemplate: * query*(java.lang.String,*{0+})>", index: 0 }
-   - { method: "<org.springframework.jdbc.core.JdbcTemplate: int update(java.lang.String,*{0+})>", index: 0 }
-   # log injection (CWE-117)
-+  - { method: "<org.slf4j.Logger: void trace(java.lang.String,java.lang.Object)>", index: 1 }
-   - { method: "<org.slf4j.Logger: void *(java.lang.String,java.lang.Object)>", index: 1 }
-   - { method: "<org.slf4j.Logger: void *(java.lang.String,java.lang.Object,java.lang.Object)>", index: 1 }
-   - { method: "<org.slf4j.Logger: void *(java.lang.String,java.lang.Object,java.lang.Object)>", index: 2 }
+diff --git a/taint/config/ecommerce.vkr-taint-overrides.yml b/taint/config/ecommerce.vkr-taint-overrides.yml
+index 72b8c57..c20125d 100644
+--- a/taint/config/ecommerce.vkr-taint-overrides.yml
++++ b/taint/config/ecommerce.vkr-taint-overrides.yml
+@@ -10,6 +10,9 @@ services:
+       # (the other call site, OutboxPublisher reading its own rows back, needs no taint)
+       - { method: "<com.fasterxml.jackson.databind.ObjectMapper: java.lang.Object readValue(java.lang.String,java.lang.Class)>", from: 0, to: result, type: "com.shop.payment.gateway.yookassa.dto.YooKassaNotification" }
+       - { method: "<com.shop.payment.gateway.yookassa.dto.*: * *()>", from: base, to: result }
++  inventory-service:
++    sinks:
++      - { method: "<org.slf4j.Logger: void trace(java.lang.String,java.lang.Object)>", index: 1 }
+ 
+ # Fields that never hold unvalidated text (TCI-4) are no field sources (moved from mk_entity_fields.py
+ # and mk_event_fields.py; the proof shows that EVERY writer of the field passes through validation).
