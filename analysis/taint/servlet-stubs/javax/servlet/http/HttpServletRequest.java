@@ -13,6 +13,8 @@ public interface HttpServletRequest extends javax.servlet.ServletRequest {
 
     String getPathInfo();
 
+    String getPathTranslated();
+
     String getContextPath();
 
     String getQueryString();

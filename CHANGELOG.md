@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+More of what a client sends is a source in a servlet application, and a regression gate on three
+public suites guards every change to the analysis.
+
+### Improved
+- **Servlet sources.** The request path (`getRequestURI`, `getRequestURL`, `getPathInfo`,
+  `getPathTranslated`), `getRemoteUser`, the body (`getReader`, `getInputStream`) and every
+  client-set cookie attribute are sources. Values the server decides (`getScheme`, `getMethod`,
+  `getContextPath`, `getInitParameter`, ...) are not.
+- **Element taint.** A tainted `String[]` (from `getParameterValues` or a `getParameterMap` value)
+  taints its elements, so the taint survives being stored in a container and cast back.
+- **Servlet entry points.** A servlet that inherits `doGet`/`doPost` from an abstract base class of
+  the application is analysed. Before, only handlers declared in the servlet class itself were.
+- **Transfers.** `StringTokenizer` (a query string parsed by hand) and the request-body readers
+  (`InputStreamReader`, `BufferedReader.readLine`) pass taint. `List.remove(int)` and the other
+  reads that return an element (`removeFirst`, `pollLast`, `elementAt`, ...) return what the list
+  holds; on a list whose positions are known, `remove(i)` returns only the element at `i`.
+
+### Fixed
+- An application whose classes share no package (for example `testcases.*` and `juliet.support.*`)
+  lost every finding: its sink sites were taken as library code. Each top-level package is now an
+  application package.
+
+### Results
+- Regression gate (`analysis/experiments/public/precision_gate.py`): a change may not lose a true
+  positive or add a false positive in any category against `results/gate-baseline.json`.
+- OWASP BenchmarkJava: TPR 96.5 %, FPR 0.0 % (+96.5, from +94.6).
+- Securibench Micro: 111 of 133 statements (recall 83.5 %, from 77.4 %), precision 88.8 %.
+- Juliet Java 1.3, 1332 servlet test cases: recall 89.2 %, 33 of 2622 good flows reported (1.3 %).
+  Missed: CWE81 `sendError` (not a sink: containers escape it) and Java serialization.
+
 ## 1.2.0
 
 DeltaTaint 1.2.0 keeps container elements apart, makes the analysis cache small, and reruns a

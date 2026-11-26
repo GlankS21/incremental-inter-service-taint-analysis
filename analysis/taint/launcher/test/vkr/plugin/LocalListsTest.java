@@ -139,6 +139,21 @@ class LocalListsTest {
         assertNotEquals(keys.get(safe), keys.get(get1));
     }
 
+    @Test
+    void removeReturnsTheElementAtThatPosition() {
+        Body b = new Body();
+        Var list = b.newList();
+        Invoke safe = b.add(list, b.var("safe", STRING));
+        Invoke param = b.add(list, b.var("param", STRING));
+        Invoke removed = b.remove(list, 1);
+        Invoke get0 = b.get(list, b.intConst(0));
+        Map<Invoke, String> keys = LocalLists.keys(b.ir());
+
+        assertEquals(keys.get(param), keys.get(removed));
+        assertEquals(keys.get(safe), keys.get(get0));
+        assertNotEquals(keys.get(removed), keys.get(get0));
+    }
+
     // --- shapes that keep no keys ---
 
     @Test
