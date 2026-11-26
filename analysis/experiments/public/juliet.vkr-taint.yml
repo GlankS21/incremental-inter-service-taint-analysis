@@ -1,0 +1,24 @@
+# vkr-taint configuration of the servlet test cases of Juliet Java 1.3 (NIST SARD test suite 111),
+# held out: never used to tune the tool. Built by build_juliet.py into VKR_PUBLIC_BUILD/juliet: one war
+# per CWE (78, 89, 23, 36, 80, 81, 83), each with testcasesupport and the test cases whose source is a
+# servlet request getter.
+# Score: juliet_score.py <report> --src VKR_PUBLIC_BUILD/juliet
+version: 1
+project:
+  root: ${VKR_PUBLIC_BUILD:-${VKR_EXP}/build}/juliet
+  gateway-config: auto
+services: auto
+shared: auto
+taint:
+  sinks: [cwe-89, cwe-79, cwe-78, cwe-22]
+  sources: auto
+  discovery: annotations
+analysis:
+  context: 1-call
+  heap: ${VKR_HEAP:-24g}
+  world-cache: ${VKR_WORLD_CACHE:-off}
+toolchain:
+  java-home: ${JAVA_HOME}
+  micans-jar: ${VKR_MICANS_JAR:-${MICANS_JAR}}
+gate:
+  fail-on: none

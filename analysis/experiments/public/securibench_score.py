@@ -9,6 +9,7 @@ given per directory (basic, collections, ...) and in total, with the BAD stateme
 no catalogue of the tool (response.sendRedirect: open redirect) counted apart.
 
 usage: securibench_score.py <report.json> <securibench-micro/src> [--exclude Basic40,...] [--list out.csv]
+                           [--json out.json]
 --exclude: classes left out of the build (Basic40 needs com.oreilly cos.jar); their BAD statements are
 not scored
 """
@@ -71,6 +72,7 @@ def main():
     ap.add_argument('src')
     ap.add_argument('--exclude', default='', help='comma-separated classes left out of the build')
     ap.add_argument('--list', help='write every BAD statement and flagged site with its result')
+    ap.add_argument('--json', help='write the counts per directory (input of precision_gate.py)')
     a = ap.parse_args()
     sys.stdout.reconfigure(encoding='utf-8')
     bad = bad_statements(a.src)
@@ -113,6 +115,9 @@ def main():
     print(f'{"all":<15} {total["TP"]:>4} {total["FP"]:>4} {total["FN"]:>4} {total["FN out of scope"]:>4} '
           f'{rec:>7.1%} {prec:>7.1%}')
     print('FN*: BAD statements whose sink is in no catalogue (open redirect), not in recall')
+    if a.json:
+        with open(a.json, 'w', encoding='utf-8') as f:
+            json.dump({k: dict(v) for k, v in [*per.items(), ('all', total)]}, f, indent=1, sort_keys=True)
     if a.list:
         with open(a.list, 'w', newline='', encoding='utf-8') as f:
             w = csv.writer(f)
