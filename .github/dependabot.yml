@@ -16,3 +16,9 @@ updates:
   - package-ecosystem: docker
     directory: /analysis
     schedule: { interval: weekly }
+    # the JDK of each stage is a choice, not a version to follow: Micans' Gradle toolchain needs 17,
+    # the channel-extractor is built with 21, the analysis runs on 24; a new JDK is tested by hand
+    ignore:
+      - dependency-name: eclipse-temurin
+        update-types: [version-update:semver-major]
+      - dependency-name: maven   # its tags carry the JDK (3.9.9-eclipse-temurin-21)
