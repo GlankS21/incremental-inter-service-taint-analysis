@@ -54,7 +54,7 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21', cache: maven }
       - run: ./mvnw -B -DskipTests package
-      - uses: GlankS21/web-project@v1
+      - uses: GlankS21/incremental-inter-service-taint-analysis@v1
         with:
           path: .                 # the Maven multi-module root
 ```
