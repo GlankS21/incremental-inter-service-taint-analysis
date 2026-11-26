@@ -13,7 +13,7 @@ COPY taint/patches/build_micans.sh taint/patches/*.patch /build/patches/
 RUN sh /build/patches/build_micans.sh /out/micans.jar
 
 # --- channel-extractor (Java 21)
-FROM maven:3.9.9-eclipse-temurin-21 AS extractor
+FROM maven:3.9-eclipse-temurin-26 AS extractor
 COPY channel-extractor /build
 RUN cd /build && mvn -B -q -ntp -DskipTests package \
     && cp target/channel-extractor-0.1.0-SNAPSHOT.jar /out.jar
