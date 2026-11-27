@@ -110,12 +110,18 @@ runs:
         echo "sarif=$out/vkr-taint.sarif" >> "$GITHUB_OUTPUT"
         [ -f "$out/vkr-taint.sarif" ] && echo "has-sarif=true" >> "$GITHUB_OUTPUT"
         if [ -f "$out/vkr-taint-report.json" ]; then
-          python3 - "$out/vkr-taint-report.json" >> "$GITHUB_OUTPUT" <<'EOF'
-        import json, sys
+          python3 - "$out/vkr-taint-report.json" <<'EOF'
+        import json, os, sys
         r = json.load(open(sys.argv[1], encoding='utf-8'))
-        print(f"findings={len(r.get('findings', r['chains']))}")
-        print(f"chains={len(r['chains'])}")
-        print(f"new={len(r.get('newFindings', r.get('new', [])))}")
+        new = len(r.get('newFindings', r.get('new', [])))
+        with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+            print(f"findings={len(r.get('findings', r['chains']))}", file=f)
+            print(f"chains={len(r['chains'])}", file=f)
+            print(f"new={new}", file=f)
+        if r.get('toolChanged'):
+            print(f"::warning::vkr-taint: the baseline was made by another version of DeltaTaint: the {new} new "
+                  "finding(s) may come from the tool and do not fail the gate; the next push to the baseline branch "
+                  "stores a baseline of this version")
         EOF
           python3 "$GITHUB_ACTION_PATH/analysis/taint/scripts/report_md.py" "$out/vkr-taint-report.json" \
             --sarif "$out/vkr-taint.sarif" --blob "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$HEAD_SHA" \

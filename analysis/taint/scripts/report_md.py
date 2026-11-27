@@ -78,6 +78,12 @@ def main():
               f'({len(r["new"])} new, {len(r["removed"])} removed chains).')
     else:
         print(f'{len(r["new"])} new, {len(r["removed"])} removed chains against the baseline.')
+    if r.get('toolChanged'):
+        made_by = code(r['baselineTool']) if r.get('baselineTool') else 'version 1.4 or older'
+        print(f'\n> **The baseline was made by another version of DeltaTaint** ({made_by}, now {code(r["tool"])}): '
+              'a finding marked 🆕 may come from the new version rather than from this change, so new findings do '
+              'not fail the gate in this run. The next push to the baseline branch stores a baseline of this '
+              'version (a `gate.baseline` file has to be regenerated).')
     if r.get('failed'):
         print(f'\n> **{len(r["failed"])} service(s) not analysed, their chains are missing:** {", ".join(code(x) for x in r["failed"])}')
 

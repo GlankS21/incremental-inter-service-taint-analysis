@@ -47,5 +47,30 @@ class DetailsTest(unittest.TestCase):
         self.assertNotIn('<img', out)
 
 
+class ToolChangedTest(unittest.TestCase):
+    """Against a baseline of another version of the tool the summary says why new findings pass."""
+
+    def summary(self, **fields):
+        report = {'tool': 'a' * 16, 'chains': [], 'findings': [], 'seconds': 0, 'services': {},
+                  'new': [], 'removed': [], 'newFindings': [], 'removedFindings': [], **fields}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'r.json')
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(report, f)
+            return subprocess.run([sys.executable, '-I', os.path.join(SCRIPTS, 'report_md.py'), path],
+                                  capture_output=True, text=True, encoding='utf-8', check=True).stdout
+
+    def test_a_baseline_of_another_version_is_named(self):
+        out = self.summary(baselineTool='b' * 16, toolChanged=True)
+        self.assertIn('another version of DeltaTaint** (`bbbbbbbbbbbbbbbb`, now `aaaaaaaaaaaaaaaa`)', out)
+        self.assertIn('do not fail the gate', out)
+
+    def test_a_baseline_without_a_version_is_older_than_1_5(self):
+        self.assertIn('(version 1.4 or older, now', self.summary(baselineTool=None, toolChanged=True))
+
+    def test_a_baseline_of_this_version_has_no_notice(self):
+        self.assertNotIn('another version', self.summary(baselineTool='a' * 16, toolChanged=False))
+
+
 if __name__ == '__main__':
     unittest.main()

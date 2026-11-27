@@ -11,6 +11,16 @@
 - **Code scanning ranks command injection and path traversal as errors.** Their SARIF results were
   warnings with security-severity 5.0 (medium) and a rule without a name or description. They are
   now `CommandInjection` (9.8) and `PathTraversal` (7.5).
+- **Upgrading DeltaTaint does not fail pull requests on the findings the upgrade adds.** A report
+  records the version of the tool that made it (`tool`). Against a baseline of another version,
+  which includes every baseline of 1.4 and older, new findings are still marked and listed, with a
+  warning, but they do not fail the gate: they may come from the tool rather than from the change.
+  A service that could not be analysed still fails it. The next push to the baseline branch stores a
+  baseline of the new version; a `gate.baseline` file has to be regenerated.
+  OWASP BenchmarkJava, unchanged code, against a baseline of an earlier version (1243 findings): the
+  gate failed on 27 new findings (19 command injection, 8 path traversal), all of them from the tool.
+  It now passes with a warning and lists the same 27. Against a baseline of the same version that
+  lacks one finding, it still fails on that finding.
 
 ### Changed
 - One table, `analysis/taint/scripts/cwe.py`, describes every built-in catalogue: the name a
