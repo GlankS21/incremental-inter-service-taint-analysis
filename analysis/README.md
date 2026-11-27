@@ -202,7 +202,8 @@ Fields of `vkr-taint-report.json`:
 - `unchecked`: baseline chains through a service that failed now;
 - `failed`: services that could not be analysed;
 - `services`: per service, the run key and whether the run and summary came from the cache, and
-  the seconds.
+  the seconds; for a service that failed, the reason (`failed`) and its log relative to the report
+  (`log`).
 
 In `vkr-taint.sarif`:
 
@@ -223,8 +224,11 @@ In `vkr-taint.sarif`:
 | 2 | `--gate`: a service could not be analysed, so its chains are missing |
 | 3 | configuration or build error |
 
-A service whose analysis fails does not stop the run. It is listed under `failed`, and the log path
-is in the report.
+A service whose analysis fails does not stop the run. It is listed under `failed`, with the reason:
+out of memory (raise `analysis.heap`), killed for lack of memory (exit 137: the heap is larger than
+the machine's memory, so lower it), a stack overflow, or the exit status. Its log is copied next to
+the report as `vkr-taint-logs/<service>.log` (the last 4 MB of it), and the action uploads it with
+the report in the `vkr-taint-report` artifact.
 
 ### Servlet applications
 

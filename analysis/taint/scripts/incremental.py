@@ -232,6 +232,43 @@ def prepare(svc, rkey, base, discovery):
     return w
 
 
+LOGS = 'vkr-taint-logs'  # next to the report: the logs of the services that failed (the action uploads them)
+LOG_LIMIT = 4 << 20  # bytes of such a log that are kept, from its end
+OOM = re.compile(r'java\.lang\.OutOfMemoryError(:|$)')
+
+
+def failure_reason(lines, heap):
+    """Why a Micans run failed, from the lines of its log, with the fix where it is known."""
+    last = lines[-1] if lines else ''
+    code = last.split()[0][len('exit='):] if last.startswith('exit=') else None
+    if any(OOM.search(l) for l in lines):
+        return (f'out of memory: the Java heap ({heap}) is too small for this service; raise analysis.heap '
+                '(the action input heap) if the machine has the memory')
+    if code == '137':
+        return (f'killed (exit 137), most likely for lack of memory: the heap ({heap}) may be larger than the '
+                'memory of the machine; lower analysis.heap (the action input heap) or use a larger machine')
+    if any('java.lang.StackOverflowError' in l for l in lines):
+        return 'stack overflow in the analysis'
+    return f'analysis failed (exit {code})' if code else 'analysis failed (its log has no exit status)'
+
+
+def keep_log(log, out_dir, svc):
+    """Copies a failed service's log (its last LOG_LIMIT bytes) to <out_dir>/vkr-taint-logs/<svc>.log:
+    the workdir that holds it is not kept by the action. -> the copy's path relative to out_dir, or
+    None when there is no log."""
+    if not (log and os.path.isfile(log)):
+        return None
+    rel = f'{LOGS}/{svc}.log'
+    os.makedirs(os.path.join(out_dir, LOGS), exist_ok=True)
+    with open(log, 'rb') as src, open(os.path.join(out_dir, rel), 'wb') as dst:
+        size = src.seek(0, os.SEEK_END)
+        src.seek(max(0, size - LOG_LIMIT))
+        if size > LOG_LIMIT:
+            dst.write(f'[the first {size - LOG_LIMIT} bytes of the log are left out]\n'.encode())
+        shutil.copyfileobj(src, dst)
+    return rel
+
+
 class ServiceFailed(Exception):
     """One service could not be analysed; the run goes on with the others and reports it."""
 
@@ -254,7 +291,7 @@ def analyse(svc, rkey, flows_path, base, discovery):
     with open(log, encoding='utf-8', errors='replace') as f:
         lines = f.read().splitlines()
     if not lines or not lines[-1].startswith('exit=0'):
-        raise ServiceFailed('analysis failed', log)
+        raise ServiceFailed(failure_reason(lines, CFG['analysis']['heap']), log)
     flows = [l for l in lines if l.startswith(FLOW_PREFIXES)]
     with open(flows_path + '.tmp', 'w', encoding='utf-8') as f:
         f.write('\n'.join(flows) + '\n')
@@ -317,6 +354,7 @@ def main():
     compile_launcher()
     tool = tool_key(T, CFG['toolchain']['micans_jar'], EXTRACTOR_JAR, CFG['toolchain']['java_home'])
     report = {'tool': tool, 'services': {}}
+    out_dir = os.path.dirname(os.path.abspath(a.out))
     summaries, failed = [], []
     for svc in services:
         t0 = time.time()
@@ -337,12 +375,15 @@ def main():
         except (ServiceFailed, subprocess.CalledProcessError, OSError, ValueError) as e:
             # a failed service has no summary: compose marks the channels into it "(no summary yet)"
             reason = e.reason if isinstance(e, ServiceFailed) else f'{type(e).__name__}: {e}'
-            log = getattr(e, 'log', None)
+            log = keep_log(getattr(e, 'log', None), out_dir, svc)
             failed.append(svc)
             report['services'][svc] = {'failed': reason, 'log': log, 'seconds': round(time.time() - t0, 1)}
-            print(f'{svc}: FAILED ({reason})' + (f', see {log}' if log else '') + f', {time.time() - t0:.0f} s',
-                  flush=True)
+            print(f'{svc}: FAILED ({reason})' + (f', see {os.path.join(out_dir, *log.split("/"))}' if log else '')
+                  + f', {time.time() - t0:.0f} s', flush=True)
             continue
+        stale = os.path.join(out_dir, LOGS, f'{svc}.log')  # of an earlier run into the same directory
+        if os.path.isfile(stale):
+            os.remove(stale)
         summaries.append(summary)
         report['services'][svc] = {'runKey': rkey[:16], 'runCached': hit_run, 'summaryCached': hit_summary,
                                    'seconds': round(time.time() - t0, 1)}

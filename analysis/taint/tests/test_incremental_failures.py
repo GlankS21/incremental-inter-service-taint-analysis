@@ -36,12 +36,16 @@ THROUGH_ORDER = ('ep:cancel:GET /refund/{id} <0>  --HTTP /order/{id}-->  ep:orde
 TOOL = 't' * 16  # the tool key of the run (incremental.tool_key is stubbed)
 
 
-def run(*args, baseline=None, failing=('order',)):
+def run(*args, baseline=None, failing=('order',), log='exit=1 seconds=0', stale=(), logs=None):
     """incremental.main() on the model above with the services stubbed: a service in failing fails its
-    analysis, "cancel" has the summary CANCEL, any other one no entries. baseline: the baseline report
-    (default: the chains LOCAL and THROUGH_ORDER, made by this version of the tool).
-    -> (exit code, report, stdout)"""
+    analysis and leaves the log text log, "cancel" has the summary CANCEL, any other one no entries.
+    baseline: the baseline report (default: the chains LOCAL and THROUGH_ORDER, made by this version
+    of the tool). stale: services with a log of an earlier run next to the report. logs: a dict that
+    gets the logs next to the report after the run. -> (exit code, report, stdout)"""
     with tempfile.TemporaryDirectory() as tmp:
+        for svc in stale:
+            os.makedirs(os.path.join(tmp, incremental.LOGS), exist_ok=True)
+            open(os.path.join(tmp, incremental.LOGS, f'{svc}.log'), 'w').close()
         model = os.path.join(tmp, 'channels.json')
         with open(model, 'w', encoding='utf-8') as f:
             json.dump(MODEL, f)
@@ -55,6 +59,9 @@ def run(*args, baseline=None, failing=('order',)):
 
         def analyse(svc, rkey, flows, base, discovery):
             if svc in failing:
+                os.makedirs(os.path.join(tmp, svc), exist_ok=True)
+                with open(os.path.join(tmp, svc, 'run.log'), 'w', encoding='utf-8') as f:
+                    f.write(log)
                 raise incremental.ServiceFailed('analysis failed', os.path.join(tmp, svc, 'run.log'))
             open(flows, 'w').close()
 
@@ -88,6 +95,10 @@ def run(*args, baseline=None, failing=('order',)):
                 incremental.main()
             except SystemExit as e:
                 code = e.code
+        if logs is not None and os.path.isdir(os.path.join(tmp, incremental.LOGS)):
+            for name in os.listdir(os.path.join(tmp, incremental.LOGS)):
+                with open(os.path.join(tmp, incremental.LOGS, name), encoding='utf-8') as f:
+                    logs[name] = f.read()
         with open(out, encoding='utf-8') as f:
             return code, json.load(f), stdout.getvalue()
 

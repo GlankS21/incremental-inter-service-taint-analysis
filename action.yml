@@ -119,9 +119,10 @@ runs:
             print(f"chains={len(r['chains'])}", file=f)
             print(f"new={new}", file=f)
         if r.get('toolChanged'):
-            print(f"::warning::vkr-taint: the baseline was made by another version of DeltaTaint: the {new} new "
-                  "finding(s) may come from the tool and do not fail the gate; the next push to the baseline branch "
-                  "stores a baseline of this version")
+            found = (f"the {new} new finding(s) may come from the tool and do not fail the gate" if new else
+                     "a new finding would not fail the gate")
+            print(f"::warning::vkr-taint: the baseline was made by another version of DeltaTaint, so {found}; "
+                  "the next push to the baseline branch stores a baseline of this version")
         EOF
           python3 "$GITHUB_ACTION_PATH/analysis/taint/scripts/report_md.py" "$out/vkr-taint-report.json" \
             --sarif "$out/vkr-taint.sarif" --blob "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$HEAD_SHA" \
@@ -167,7 +168,7 @@ runs:
       run: |
         case "$CODE" in
           1) echo "::error::vkr-taint: $NEW new finding(s), see the job summary and code scanning";;
-          2) echo "::error::vkr-taint: a service could not be analysed, its chains are missing";;
+          2) echo "::error::vkr-taint: a service could not be analysed, its chains are missing; the job summary says why, and its log is under vkr-taint-logs/ in the vkr-taint-report artifact";;
           *) echo "::error::vkr-taint failed (exit $CODE)";;
         esac
         exit 1
