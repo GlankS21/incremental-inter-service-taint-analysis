@@ -149,6 +149,19 @@ CATALOGUES = {
         ]),
     ],
 }
+# a URI built from components is tainted by any of them: the path for a file (CWE-22), the host
+# for a request (CWE-918); new URI("file", null, dir + name, null, null) then new File(uri)
+URI_COMPONENTS = [
+    (f'<java.net.URI: void <init>({sig})>', i, 'base')
+    for sig, idx in [
+        ('java.lang.String,java.lang.String,java.lang.String', (0, 1, 2)),
+        ('java.lang.String,java.lang.String,java.lang.String,java.lang.String', (0, 1, 2, 3)),
+        ('java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String', (0, 1, 2, 3, 4)),
+        ('java.lang.String,java.lang.String,java.lang.String,int,java.lang.String,java.lang.String,java.lang.String',
+         (0, 1, 2, 4, 5, 6)),
+    ]
+    for i in idx
+]
 # transfers that only a catalogue needs (the URL or template text derived from the request text)
 CATALOGUE_TRANSFERS = {
     'cwe-918': [
@@ -157,6 +170,7 @@ CATALOGUE_TRANSFERS = {
         ('<java.net.URI: java.net.URL toURL()>', 'base', 'result'),
         ('<java.net.URL: void <init>(java.lang.String)>', 0, 'base'),
         ('<java.net.URL: void <init>(java.net.URL,java.lang.String)>', 1, 'base'),
+        *URI_COMPONENTS,
     ],
     'cwe-1336': [
         ('<java.io.StringReader: void <init>(java.lang.String)>', 0, 'base'),
@@ -164,6 +178,7 @@ CATALOGUE_TRANSFERS = {
     'cwe-22': [
         ('<java.net.URI: void <init>(java.lang.String)>', 0, 'base'),
         ('<java.net.URI: java.net.URI create(java.lang.String)>', 0, 'result'),
+        *URI_COMPONENTS,
     ],
 }
 # HTML encoders end a flow (a Tai-e sanitizer is global: encoded text is clean for every sink)

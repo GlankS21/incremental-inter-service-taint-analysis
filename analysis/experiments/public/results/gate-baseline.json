@@ -1,22 +1,22 @@
 {
  "benchmark": {
   "all": {
-   "FN": 27,
+   "FN": 0,
    "FP": 0,
    "TN": 701,
-   "TP": 750
+   "TP": 777
   },
   "cmdi": {
-   "FN": 19,
+   "FN": 0,
    "FP": 0,
    "TN": 125,
-   "TP": 107
+   "TP": 126
   },
   "pathtraver": {
-   "FN": 8,
+   "FN": 0,
    "FP": 0,
    "TN": 135,
-   "TP": 125
+   "TP": 133
   },
   "sqli": {
    "FN": 0,
@@ -94,10 +94,10 @@
    "TP": 11
   },
   "all": {
-   "FN": 22,
+   "FN": 18,
    "FN out of scope": 2,
    "FP": 14,
-   "TP": 111
+   "TP": 115
   },
   "arrays": {
    "FP": 5,
@@ -109,9 +109,9 @@
    "TP": 51
   },
   "collections": {
-   "FN": 5,
+   "FN": 2,
    "FP": 4,
-   "TP": 9
+   "TP": 12
   },
   "datastructures": {
    "FP": 1,
@@ -121,9 +121,8 @@
    "TP": 3
   },
   "inter": {
-   "FN": 1,
    "FP": 1,
-   "TP": 15
+   "TP": 16
   },
   "pred": {
    "FP": 1,

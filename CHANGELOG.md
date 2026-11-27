@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Improved
+- **Sinks see container contents.** An application container passed to a sink (a `List` to
+  `new ProcessBuilder(list)`, a map to a logger) reports the taints it holds. OWASP BenchmarkJava:
+  cmdi 107 → 126 and pathtraver 125 → 133 found, 777 of 777 in all (TPR 100 %, FPR 0 %).
+- **Iterators and map entries.** `iterator().next()`, `entrySet()` with `getKey`/`getValue`, and
+  iterated `values()`/`keySet()` return elements of the element type, so the taint survives a cast
+  back to `String`. Map keys are kept apart from values: `keySet` sees the keys, `get` and `values`
+  see the values. Securibench Micro: 111 → 115 of 133 found, false sinks unchanged at 14.
+- **URI components.** The component constructors of `java.net.URI` (scheme, host, path, query, ...)
+  pass taint to the URI in the `cwe-918` and `cwe-22` catalogues.
+- **String builders** are tracked as containers when the points-to analysis keeps them apart. With
+  Tai-e's default (`merge-string-builders: true`) they are one object, which is not tracked, so
+  this changes no result yet.
+
 ## 1.3.0
 
 DeltaTaint 1.3.0 reads more of what a client sends to a servlet application, no longer loses the
