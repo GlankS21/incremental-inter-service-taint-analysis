@@ -164,6 +164,31 @@ def finding_key(chain):
     return f'{entry} => {sink}'
 
 
+HOP = re.compile(r'\s+--(\w+) .*?-->\s+')  # a channel hop of a chain; its kind: HTTP, AMQP or DB
+SINK_AT = re.compile(r'\s+CWE-\d+ @ ')
+
+
+def chain_services(chain):
+    """The services a chain passes through, in order. A hop within one service (a row stored by one
+    request and read by another) adds none."""
+    services = []
+    for node in HOP.split(chain[:SINK_AT.search(chain).start()])[0::2]:
+        service = node.split(':')[1]
+        if not services or services[-1] != service:
+            services.append(service)
+    return services
+
+
+def crosses_services(chain):
+    return len(set(chain_services(chain))) > 1
+
+
+def through_database(chain):
+    """The chain goes through a stored entity field (a DB hop), within one service or across."""
+    end = SINK_AT.search(chain).start()
+    return 'DB' in HOP.split(chain[:end])[1::2]
+
+
 def group_findings(chains):
     """[{'key', 'chains'}], sorted by key; a finding's chains keep the order of `chains`."""
     groups = {}
@@ -355,8 +380,9 @@ def main():
         report['toolChanged'] = tool_changed = report['baselineTool'] != tool
     with open(a.out, 'w', encoding='utf-8') as f:
         json.dump(report, f, indent=1)
-    crossing = sum('-->' in c for c in chains)
-    print(f'{len(findings)} findings, {len(chains)} chains to a sink ({crossing} across a channel)'
+    crossing, stored = sum(map(crosses_services, chains)), sum(map(through_database, chains))
+    print(f'{len(findings)} findings, {len(chains)} chains to a sink ({crossing} across services, '
+          f'{stored} through the database)'
           + (f'; {len(new_findings)} new and {len(removed_findings)} removed findings '
              f'({len(new)} new, {len(removed)} removed chains)' if a.baseline else '')
           + f'; {report["seconds"]:.0f} s total -> {a.out}')

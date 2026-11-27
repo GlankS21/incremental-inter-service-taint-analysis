@@ -9,7 +9,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from incremental import group_findings  # noqa: E402
+from incremental import crosses_services, group_findings, through_database  # noqa: E402
 from sarif import parse, representative, source_labels  # noqa: E402
 
 
@@ -67,8 +67,9 @@ def main():
 
     chains = r['chains']
     findings = r.get('findings') or group_findings(chains)
-    crossing = sum('-->' in c for c in chains)
-    print(f'\n**{len(findings)} findings** ({len(chains)} chains to a sink, {crossing} across a channel), '
+    crossing, stored = sum(map(crosses_services, chains)), sum(map(through_database, chains))
+    print(f'\n**{len(findings)} findings** ({len(chains)} chains to a sink: {crossing} across services, '
+          f'{stored} through the database), '
           f'{r["seconds"]:.0f} s total.')
     new = set(r.get('newFindings', []))
     if 'new' not in r:

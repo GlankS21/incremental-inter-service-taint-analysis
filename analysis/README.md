@@ -210,6 +210,10 @@ In `vkr-taint.sarif`:
 - `codeFlows`, one per chain of the finding, go through each endpoint's handler;
 - `partialFingerprints` do not change when only line numbers change;
 - `baselineState` is `new` or `unchanged`;
+- `properties.crossService` is true when a chain of the finding calls another service (HTTP, AMQP,
+  or a table shared by two services), `properties.throughDatabase` when one goes through a stored
+  entity field; a field stored by one request and read by another of the same service is not a
+  service call;
 - rules carry `security-severity` for code scanning.
 
 | Exit code | |

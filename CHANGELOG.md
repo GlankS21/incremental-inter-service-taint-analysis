@@ -21,6 +21,13 @@
   gate failed on 27 new findings (19 command injection, 8 path traversal), all of them from the tool.
   It now passes with a warning and lists the same 27. Against a baseline of the same version that
   lacks one finding, it still fails on that finding.
+- **A field stored and read back within one service is not a service call.** Such chains were
+  counted "across a channel", and their SARIF message read `across 1 service call(s):
+  order-service -> order-service`. The run and the job summary now count chains across services
+  and chains through the database apart. In SARIF, `crossService` is true only when the service
+  changes, the new `throughDatabase` marks a DB hop, and the message names the stored field. The
+  testbed's base commit: 16 chains, "6 across a channel" → "0 across services, 6 through the
+  database"; train-ticket: 106 of 243 chains across services, as before.
 
 ### Changed
 - One table, `analysis/taint/scripts/cwe.py`, describes every built-in catalogue: the name a
