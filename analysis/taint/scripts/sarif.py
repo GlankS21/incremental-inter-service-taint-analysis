@@ -16,26 +16,9 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cwe  # noqa: E402
 from incremental import finding_key, group_findings  # noqa: E402
 
-RULES = {
-    'CWE-89': ('SqlInjection', 'SQL injection',
-               'A request parameter reaches an SQL query (JPA, JdbcTemplate or a MyBatis ${} mapper), '
-               'possibly through other services.'),
-    'CWE-117': ('LogInjection', 'Log injection',
-                'A request parameter reaches a log statement unneutralized, possibly through other services.'),
-    'CWE-79': ('CrossSiteScripting', 'Cross-site scripting',
-               'A request parameter, or a value stored from one, is returned as the response body without '
-               'HTML encoding, possibly through other services.'),
-    'CWE-918': ('ServerSideRequestForgery', 'Server-side request forgery',
-                'A request parameter decides the URL the service opens, possibly through other services.'),
-    'CWE-1336': ('TemplateInjection', 'Template injection',
-                 'A request parameter is compiled as a template (FreeMarker, Thymeleaf, Velocity), possibly '
-                 'through other services.'),
-}
-LEVEL = {'CWE-89': 'error', 'CWE-117': 'warning', 'CWE-79': 'error', 'CWE-918': 'error', 'CWE-1336': 'error'}
-# GitHub orders code scanning alerts by security-severity
-SEVERITY = {'CWE-89': '8.8', 'CWE-117': '5.3', 'CWE-79': '6.1', 'CWE-918': '8.6', 'CWE-1336': '9.8'}
 SINK = re.compile(r'\s+(CWE-\d+) @ ([\w$.]+)#([\w$<>]+):(\d+)$')
 EDGE = re.compile(r'\s+--(\w+) (.*?)-->\s+')
 NODE = re.compile(r'^(\w+):([^:]+):(.*?)(?: <([^>]*)>)?$')
@@ -82,6 +65,18 @@ def git_root(path):
         d = parent
 
 
+def rule(rule_id):
+    """The SARIF rule of a CWE: its entry of the built-in catalogues (cwe.py), else only the id."""
+    c = cwe.BY_ID.get(rule_id)
+    name, title, description = (c.rule, c.title, c.description) if c else (rule_id, rule_id, rule_id)
+    return {'id': rule_id, 'name': name,
+            'shortDescription': {'text': title},
+            'fullDescription': {'text': description},
+            'helpUri': f'https://cwe.mitre.org/data/definitions/{rule_id.split("-")[1]}.html',
+            'properties': {'tags': ['security', 'taint', rule_id.lower()],
+                           'security-severity': c.severity if c else '5.0'}}
+
+
 def location(uri, line, text, prefix=''):
     loc = {'physicalLocation': {'artifactLocation': {'uri': prefix + uri, 'uriBaseId': '%SRCROOT%'}}}
     if line:
@@ -124,7 +119,7 @@ def to_sarif(report, model, root, baseline=None, uri_base=None):
     old = {finding_key(c) for c in baseline['chains']} if baseline else None
 
     def code_flow(chain):
-        nodes, edges, cwe, cls, method, line = parse(chain)
+        nodes, edges, cwe_id, cls, method, line = parse(chain)
         flow, last_file = [], None
         for i, (kind, service, name, param) in enumerate(nodes):
             h = handlers.get(f'{kind}:{service}:{name}', {})
@@ -135,7 +130,7 @@ def to_sarif(report, model, root, baseline=None, uri_base=None):
             if h.get('file'):
                 flow.append(location(h['file'], h.get('line'), what, prefix))
         sink_uri = sink_file(index, cls, nodes[-1][1], last_file)
-        sink_text = f'{cwe} sink in {cls}#{method}'
+        sink_text = f'{cwe_id} sink in {cls}#{method}'
         sink = location(sink_uri, line, sink_text, prefix) if sink_uri else {'message': {'text': sink_text}}
         if sink_uri:
             flow.append(sink)
@@ -145,16 +140,17 @@ def to_sarif(report, model, root, baseline=None, uri_base=None):
     for finding in report.get('findings') or group_findings(report['chains']):
         chains = finding['chains']
         main = representative(chains)
-        nodes, edges, cwe, cls, method, line = parse(main)
+        nodes, edges, cwe_id, cls, method, line = parse(main)
         sink, _ = code_flow(main)
         flows = [f for f in (code_flow(c)[1] for c in [main] + [c for c in chains if c != main]) if f]
         services = [n[1] for n in nodes]
         entry = nodes[0]
         sources = source_labels(chains)
+        known = cwe.BY_ID.get(cwe_id)
         result = {
-            'ruleId': cwe,
-            'level': LEVEL.get(cwe, 'warning'),
-            'message': {'text': f'{RULES.get(cwe, (cwe, cwe))[1]}: {entry[2]} ({entry[1]}) reaches '
+            'ruleId': cwe_id,
+            'level': known.level if known else 'warning',
+            'message': {'text': f'{known.title if known else cwe_id}: {entry[2]} ({entry[1]}) reaches '
                                 f'{cls}#{method}' + (f' across {len(services) - 1} service call(s): '
                                                      f'{" -> ".join(services)}' if len(services) > 1 else '')
                                 + (f'; source {", ".join(sources)}' if sources else '')
@@ -169,13 +165,7 @@ def to_sarif(report, model, root, baseline=None, uri_base=None):
         if old is not None:
             result['baselineState'] = 'unchanged' if finding['key'] in old else 'new'
         results.append(result)
-    used = sorted({r['ruleId'] for r in results} | set(RULES))
-    rules = [{'id': r, 'name': RULES.get(r, (r,))[0],
-              'shortDescription': {'text': RULES.get(r, (r, r))[1]},
-              'fullDescription': {'text': RULES.get(r, (r, r, r))[2]},
-              'helpUri': f'https://cwe.mitre.org/data/definitions/{r.split("-")[1]}.html',
-              'properties': {'tags': ['security', 'taint', r.lower()],
-                             'security-severity': SEVERITY.get(r, '5.0')}} for r in used]
+    rules = [rule(r) for r in sorted({r['ruleId'] for r in results} | set(cwe.BY_ID))]
     run = {'tool': {'driver': {'name': 'vkr-taint', 'rules': rules}},
            'results': results}
     if report.get('failed'):

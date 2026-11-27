@@ -46,7 +46,7 @@ EXTRACTOR_JAR = os.environ.get('VKR_CHANNEL_EXTRACTOR') or os.path.join(
     T, '..', 'channel-extractor', 'target', 'channel-extractor-0.1.0-SNAPSHOT.jar')
 CONFIG_SCRIPTS = ['prepare.sh', 'prep_micans.py', 'pack_jre.py', 'mk_dto_fields.py', 'mk_event_fields.py',
                   'mk_field_config.py', 'mk_entity_fields.py', 'mk_db_config.py', 'run_taint.sh',
-                  'gen_taint_config.py', 'vkr_prepare.py', 'vkr_config.py', 'vkr_yaml.py']
+                  'gen_taint_config.py', 'vkr_prepare.py', 'vkr_config.py', 'vkr_yaml.py', 'cwe.py']
 CFG = None  # the loaded vkr-taint.yml (main)
 FLOW_PREFIXES = ('TaintFlow{', 'StoreFlow{', 'ResponseFlow{')
 

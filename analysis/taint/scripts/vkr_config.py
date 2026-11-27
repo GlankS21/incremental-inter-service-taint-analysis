@@ -5,8 +5,8 @@
     services:  auto            # or a list of names / {name, module, jar, classes}
     shared:    auto            # or a list of names / {name, module, artifact}
     taint:
-      sinks: [cwe-89, cwe-117] # built-in catalogues (gen_taint_config.CATALOGUES: also cwe-79,
-                               # cwe-918, cwe-1336, cwe-78, cwe-22) or Tai-e yml files
+      sinks: [cwe-89, cwe-117] # built-in catalogues (cwe.CATALOGUES: also cwe-79, cwe-918,
+                               # cwe-1336, cwe-78, cwe-22) or Tai-e yml files
       sources: auto            # externally reachable endpoints + listeners of the channel model
       discovery: annotations   # request bodies, @Entity classes and channel payloads, not package names
       packages: { dto: [..], entity: [..], event: [..] }   # optional override of the discovery
@@ -30,11 +30,14 @@ import sys
 import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cwe  # noqa: E402
 import vkr_yaml  # noqa: E402
 
 CONFIG_NAME = 'vkr-taint.yml'
-KNOWN_SINKS = ('cwe-89', 'cwe-117', 'cwe-79', 'cwe-918', 'cwe-1336', 'cwe-78', 'cwe-22')
-DEFAULT_SINKS = ('cwe-89', 'cwe-117')  # the catalogues of the thesis measurements
+KNOWN_SINKS = cwe.CATALOGUES
+# a vkr-taint.yml without taint.sinks: the catalogues of the thesis measurements (a repository without
+# a vkr-taint.yml gets every catalogue, vkr_taint.GENERATED)
+DEFAULT_SINKS = ('cwe-89', 'cwe-117')
 SKIP_DIRS = {'target', 'build', 'node_modules', 'out', 'bin', '.git', '.idea', '.mvn', '.gradle', 'src'}
 INFRA_MARKERS = ('@EnableConfigServer', '@EnableEurekaServer')
 GATEWAY_DEP = 'spring-cloud-starter-gateway'
