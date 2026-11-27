@@ -18,6 +18,9 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cwe  # noqa: E402
+
 # TaintFlow{source -> sink call}; StoreFlow{source -> <Entity: T field>} (vkr.plugin.SpringDataModel);
 # ResponseFlow{source -> <Handler: R m(..)>@L<line>} (vkr.plugin.ResponseBodySink, CWE-79)
 ANY_FLOW = re.compile(r'^(TaintFlow|StoreFlow|ResponseFlow)\{(.*?) -> (<.*)\}$')
@@ -45,20 +48,7 @@ EVENT_PACKAGES = [p + '.' for p in DISCOVERY.get('eventPackages', [])] or ['com.
 ENTITY_CLASSES = set(DISCOVERY.get('entityClasses', []))
 OUTBOX_METHODS = {m for _, m in DISCOVERY.get('outboxSinks', [])} or {'enqueue'}
 REST_TEMPLATE_CALL = re.compile(r'\.(exchange|postForObject|postForEntity|getForObject|getForEntity|put|delete)\(')
-LOGGER_CALL = re.compile(r'\.(trace|debug|info|warn|error)\(')
-SQL_CALL = re.compile(r'\.(createNativeQuery|createQuery|query\w*|update|execute\w*|prepareStatement|prepareCall'
-                      r'|addBatch|batchUpdate)\(')
-# the other built-in catalogues (gen_taint_config.CATALOGUES cwe-918, cwe-1336)
-SSRF_CALL = re.compile(r'\.(openConnection|openStream|newBuilder|uri)\(')
-TEMPLATE_CALL = re.compile(r'\.(process|evaluate)\(')
-# servlet catalogues: PrintWriter output (CWE-79), OS commands (CWE-78), file paths (CWE-22)
-WRITER_CALL = re.compile(r'\.(print|println|write|format|printf|append)\(')
-COMMAND_CALL = re.compile(r'\.(exec|command)\(')
-PATH_CALL = re.compile(r'\.(get|of)\(')
-# constructors that are sinks of a catalogue: the call prints no class, the caller's bytecode tells
-CTOR_SINKS = {'freemarker/template/Template': 'CWE-1336', 'java/lang/ProcessBuilder': 'CWE-78',
-              **{f'java/io/{c}': 'CWE-22' for c in ('File', 'FileInputStream', 'FileOutputStream', 'FileReader',
-                                                     'FileWriter', 'RandomAccessFile')}}
+# the CWE of a sink call of a built-in catalogue: cwe.of_call (method name), cwe.of_constructor
 # MyBatis mapper methods whose XML statement splices a parameter with ${} (gen_taint_config.py)
 MYBATIS_METHODS = {m for _, m in DISCOVERY.get('mybatisSinks', [])}
 
@@ -245,10 +235,9 @@ def summary(service, log_path, model_path, out_path, app_dir, common_dir):
         site = f'{sink_cls.rsplit(".", 1)[1]}#{sink_m}:{sink_line}'
         ctor = CTOR_CALL.search(call)
         callee = re.search(r'\.(\w+)\(', call).group(1) if not ctor else '<init>'
-        ctor_cwe = [cwe for owner, cwe in CTOR_SINKS.items() if owner in constructed(app_dir, sink_cls, sink_m)] \
-            if ctor else []
+        ctor_cwe = cwe.of_constructor(constructed(app_dir, sink_cls, sink_m)) if ctor else None
         if ctor_cwe:
-            exits = [{'kind': 'LOCAL', 'cwe': ctor_cwe[0], 'site': site}]
+            exits = [{'kind': 'LOCAL', 'cwe': ctor_cwe, 'site': site}]
         elif ctor:
             argc = len([a for a in ctor.group(1).split(',') if a.strip()])
             exits = []
@@ -270,20 +259,8 @@ def summary(service, log_path, model_path, out_path, app_dir, common_dir):
                     and p['origin']['method'] == sink_m]
             exits = [{'kind': 'CHANNEL', 'channel': min(pubs, key=lambda p: abs(p['origin']['line'] - sink_line))['id'],
                       'coarse': True}] if pubs else []
-        elif LOGGER_CALL.search(call):
-            exits = [{'kind': 'LOCAL', 'cwe': 'CWE-117', 'site': site}]
-        elif SQL_CALL.search(call) or callee in MYBATIS_METHODS:
-            exits = [{'kind': 'LOCAL', 'cwe': 'CWE-89', 'site': site}]
-        elif SSRF_CALL.search(call):
-            exits = [{'kind': 'LOCAL', 'cwe': 'CWE-918', 'site': site}]
-        elif TEMPLATE_CALL.search(call):
-            exits = [{'kind': 'LOCAL', 'cwe': 'CWE-1336', 'site': site}]
-        elif WRITER_CALL.search(call):
-            exits = [{'kind': 'LOCAL', 'cwe': 'CWE-79', 'site': site}]
-        elif COMMAND_CALL.search(call):
-            exits = [{'kind': 'LOCAL', 'cwe': 'CWE-78', 'site': site}]
-        elif PATH_CALL.search(call):
-            exits = [{'kind': 'LOCAL', 'cwe': 'CWE-22', 'site': site}]
+        elif local := cwe.of_call(call, sql=callee in MYBATIS_METHODS):
+            exits = [{'kind': 'LOCAL', 'cwe': local, 'site': site}]
         else:
             exits = [{'kind': 'UNKNOWN', 'site': site, 'call': call}]
         add_exits(entries, entry_ids, src_in, exits)

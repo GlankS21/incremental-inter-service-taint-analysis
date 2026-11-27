@@ -170,7 +170,10 @@ Sink catalogues:
 - **`cwe-22`**: a file named by request text: the `File`, `FileInputStream`, `FileOutputStream`,
   `FileReader`, `FileWriter` and `RandomAccessFile` constructors and `Paths.get`.
 
-The default is `[cwe-89, cwe-117]`. List the other catalogues in `taint.sinks` to enable them.
+Without a `vkr-taint.yml`, every catalogue is enabled. A file that leaves out `taint.sinks` gets
+`[cwe-89, cwe-117]`; list the other catalogues there to enable them. Each catalogue is a SARIF rule
+with its own level and `security-severity` (`cwe-117` a warning, the others errors; the names and
+values are in [`taint/scripts/cwe.py`](taint/scripts/cwe.py)).
 
 Examples: [`taint/config/ecommerce.vkr-taint.yml`](taint/config/ecommerce.vkr-taint.yml) (the
 testbed); [`experiments/public/*.vkr-taint.yml`](experiments/public) (train-ticket, mall-swarm,

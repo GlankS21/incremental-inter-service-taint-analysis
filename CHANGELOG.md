@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **A repository without a `vkr-taint.yml` is checked with every catalogue.** The generated
+  configuration left out `cwe-78` (OS command injection) and `cwe-22` (path traversal), so those
+  findings were never reported without a configuration file. OWASP BenchmarkJava without a
+  configuration file: 518 → 777 of 777 vulnerable tests found (cmdi 0 → 126, pathtraver 0 → 133),
+  no false positive, the same result as with the suite's configuration.
+- **Code scanning ranks command injection and path traversal as errors.** Their SARIF results were
+  warnings with security-severity 5.0 (medium) and a rule without a name or description. They are
+  now `CommandInjection` (9.8) and `PathTraversal` (7.5).
+
+### Changed
+- One table, `analysis/taint/scripts/cwe.py`, describes every built-in catalogue: the name a
+  configuration lists, how a sink call is recognised, and its SARIF rule. The configuration check,
+  the generated configuration, the summaries and the SARIF writer read it, so they cannot disagree.
+
 ## 1.4.0
 
 DeltaTaint 1.4.0 follows taint through the containers an application builds: a sink that receives a

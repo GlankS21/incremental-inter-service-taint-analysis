@@ -30,6 +30,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import cwe  # noqa: E402
 import sarif  # noqa: E402
 import vkr_config  # noqa: E402
 
@@ -43,7 +44,7 @@ project:
 services: auto
 shared: auto
 taint:
-  sinks: [cwe-89, cwe-117, cwe-79, cwe-918, cwe-1336]
+  sinks: [{sinks}]
   sources: auto
   discovery: annotations
 analysis:
@@ -73,7 +74,8 @@ def write_config(work, root):
     path = os.path.join(work, 'vkr-taint.yml')
     os.makedirs(work, exist_ok=True)
     with open(path, 'w', encoding='utf-8', newline='\n') as f:
-        f.write(GENERATED.format(root=json.dumps(os.path.abspath(root).replace(os.sep, '/'))))
+        f.write(GENERATED.format(root=json.dumps(os.path.abspath(root).replace(os.sep, '/')),
+                                 sinks=', '.join(cwe.CATALOGUES)))
     return path
 
 
