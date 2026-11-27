@@ -1,20 +1,39 @@
 # Changelog
 
-## Unreleased
+## 1.4.0
+
+DeltaTaint 1.4.0 follows taint through the containers an application builds: a sink that receives a
+list or map reports what it holds, and elements read through iterators and map entries keep their
+taint.
 
 ### Improved
 - **Sinks see container contents.** An application container passed to a sink (a `List` to
-  `new ProcessBuilder(list)`, a map to a logger) reports the taints it holds. OWASP BenchmarkJava:
-  cmdi 107 → 126 and pathtraver 125 → 133 found, 777 of 777 in all (TPR 100 %, FPR 0 %).
+  `new ProcessBuilder(list)`, a map to a logger) reports the taints it holds.
 - **Iterators and map entries.** `iterator().next()`, `entrySet()` with `getKey`/`getValue`, and
   iterated `values()`/`keySet()` return elements of the element type, so the taint survives a cast
   back to `String`. Map keys are kept apart from values: `keySet` sees the keys, `get` and `values`
-  see the values. Securibench Micro: 111 → 115 of 133 found, false sinks unchanged at 14.
+  see the values.
 - **URI components.** The component constructors of `java.net.URI` (scheme, host, path, query, ...)
   pass taint to the URI in the `cwe-918` and `cwe-22` catalogues.
 - **String builders** are tracked as containers when the points-to analysis keeps them apart. With
   Tai-e's default (`merge-string-builders: true`) they are one object, which is not tracked, so
   this changes no result yet.
+
+### Results
+- OWASP BenchmarkJava: 777 of 777 vulnerable tests found (TPR 100 %, from 96.5 %), FPR 0.0 %;
+  cmdi 107 → 126 and pathtraver 125 → 133.
+- Securibench Micro: 115 of 133 statements (recall 86.5 %, from 83.5 %), false sinks unchanged at
+  14 (precision 89.1 %).
+- Juliet Java 1.3, 1332 servlet test cases: unchanged (1188 found, 33 of 2622 good flows reported).
+- The regression gate passed against the 1.3.0 baseline, which is re-frozen at these numbers.
+- Testbed: unchanged. All 6 seeded vulnerabilities are found and none of the 4 negatives is
+  reported; the base commit gives 16 chains (6 across a channel).
+
+### Upgrading
+- `uses: GlankS21/incremental-inter-service-taint-analysis@v1` now gives this release. Pin
+  `@v1.4.0` for a fixed version.
+- The analysis changes, so every run key changes. The first run after upgrading is a full
+  analysis, about 4–6 minutes per service on a hosted runner; later runs reuse the cache as before.
 
 ## 1.3.0
 
