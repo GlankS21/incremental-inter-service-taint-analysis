@@ -161,7 +161,8 @@ Sink catalogues:
   servlet application the body is what the servlet writes to its `PrintWriter` (`print`, `println`,
   `write`, `format`, `printf`, `append`).
 - **`cwe-918`**: `URL.openConnection`/`openStream` and `HttpRequest.newBuilder(URI)`/`Builder.uri`.
-  `URI.create` and `new URL(..)` carry taint to the URL.
+  `URI.create`, `new URL(..)` and the component constructors of `URI` (scheme, host, path, query,
+  ...) carry taint to the URL.
 - **`cwe-1336`**: a template compiled from a string: the FreeMarker `Template` constructors,
   Thymeleaf `TemplateEngine.process` and Velocity `evaluate`.
 - **`cwe-78`**: an OS command: `Runtime.exec` (command line, arguments and environment) and
@@ -256,24 +257,39 @@ need.
   - The points-to analysis is flow-insensitive. Code behind an `if` or `switch` whose condition
     is constant inside the method (`int num = 86; if ((7 * 42) - num > 200)`, `"ABC".charAt(1)`)
     is dropped before the analysis (`vkr.plugin.ConstantBranches`).
-  - Containers: map values are kept apart by key when the key is a string constant
-    (`put("a", v)` then `get("b")` is not a flow), and the elements of a list that a method builds
-    and reads in straight-line code with constant indexes (`add`, `remove(0)`, `get(1)`) are kept
-    apart by position (`vkr.plugin.ContainerTaint`, `LocalLists`). Any other map or list read
-    returns everything stored in the container.
+  - Containers (`vkr.plugin.ContainerTaint`, `LocalLists`):
+    - map values are kept apart by key when the key is a string constant (`put("a", v)` then
+      `get("b")` is not a flow);
+    - map keys are kept apart from values: `keySet` sees the keys, `values` and `get` see the values,
+      `entrySet` sees both;
+    - the elements of a list that a method builds and reads in straight-line code with constant
+      indexes (`add`, `remove(0)`, `get(1)`) are kept apart by position;
+    - any other map or list read returns everything stored in the container;
+    - `iterator().next()`, `entrySet()` with `getKey`/`getValue`, and `values()`/`keySet()` iterated
+      return elements of the element type, so a cast back to `String` keeps the taint;
+    - a sink argument that is a container of the application (a `List` passed to
+      `new ProcessBuilder(list)`, a map passed to a logger) reports what the container holds;
+    - a `StringBuilder` or `StringBuffer` is a container of what is appended to it only when the
+      points-to analysis keeps builders apart. By default (Tai-e `merge-string-builders: true`) all
+      builders are one object, which is not tracked: an alias of a builder that a tainted string is
+      appended to (Securibench `Aliasing5`) is missed. Keeping them apart found that case and cost
+      19 % more points-to time on Securibench Micro.
   - On the testbed's seeded set, the sanitised negatives are not reported.
   - On public systems, false positives were found and fixed per case.
   - Public suites, scored per test case and checked by a regression gate
     ([`precision_gate.py`](experiments/public/precision_gate.py)): a change to the analysis may not
     lose a true positive or add a false positive in any category of any suite against
     [`results/gate-baseline.json`](experiments/public/results/gate-baseline.json).
-    - OWASP BenchmarkJava (sqli, xss, cmdi, pathtraver): TPR 96.5 %, FPR 0.0 %.
+    - OWASP BenchmarkJava (sqli, xss, cmdi, pathtraver)
+      ([`results/benchmarkjava-per-test.csv`](experiments/public/results/benchmarkjava-per-test.csv)):
+      777 of 777 vulnerable tests found (TPR 100 %), 0 of 701 safe tests reported (FPR 0.0 %).
     - Securibench Micro ([`securibench-micro.vkr-taint.yml`](experiments/public/securibench-micro.vkr-taint.yml),
       [`securibench_score.py`](experiments/public/securibench_score.py),
       [`results/securibench-micro-per-statement.csv`](experiments/public/results/securibench-micro-per-statement.csv)):
-      111 of 133 `/* BAD */` statements found (recall 83.5 %), 14 false sinks (precision 88.8 %).
+      115 of 133 `/* BAD */` statements found (recall 86.5 %), 14 false sinks (precision 89.1 %).
       Misses include reflection (4), session attributes (3), `getInitParameter` and request
-      metadata such as `getProtocol` (not sources), maps read through iterators or `entrySet`. False
+      metadata such as `getProtocol` (not sources), a list stored in another list (`Collections3`)
+      and an alias of a merged `StringBuffer` (`Aliasing5`). False
       positives: array elements are not kept apart by index, and a field write does not overwrite
       the earlier one.
     - Juliet Java 1.3, the 1332 servlet test cases of CWE 23, 36, 78, 80, 81, 83 and 89

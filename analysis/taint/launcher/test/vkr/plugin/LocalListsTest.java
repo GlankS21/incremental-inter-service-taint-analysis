@@ -245,4 +245,20 @@ class LocalListsTest {
         ContainerTaint.Read all = new ContainerTaint.Read(null, null);
         assertTrue(all.sees("keyA") && all.sees("keyB") && all.sees(null));
     }
+
+    @Test
+    void mapKeysAreSeenOnlyByKeyReads() {
+        String keys = ContainerTaint.KEYS;
+        ContainerTaint.Shape raw = ContainerTaint.Shape.RAW;
+        // get(k) and values() return values, never a key stored by put(key, v)
+        assertTrue(!new ContainerTaint.Read(null, null).sees(keys));
+        assertTrue(!new ContainerTaint.Read(null, "keyB").sees(keys));
+        // keySet() returns the keys only
+        ContainerTaint.Read keySet = new ContainerTaint.Read(null, null, ContainerTaint.View.KEYS, raw);
+        assertTrue(keySet.sees(keys));
+        assertTrue(!keySet.sees(null) && !keySet.sees("keyA"));
+        // entrySet() and toString() return both
+        ContainerTaint.Read all = new ContainerTaint.Read(null, null, ContainerTaint.View.ALL, raw);
+        assertTrue(all.sees(keys) && all.sees(null) && all.sees("keyA"));
+    }
 }
