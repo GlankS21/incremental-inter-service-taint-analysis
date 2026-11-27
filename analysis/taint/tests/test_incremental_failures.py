@@ -33,55 +33,69 @@ THROUGH_ORDER = ('ep:cancel:GET /refund/{id} <0>  --HTTP /order/{id}-->  ep:orde
                  'CWE-117 @ OrderController#get:100')
 
 
+TOOL = 't' * 16  # the tool key of the run (incremental.tool_key is stubbed)
+
+
+def run(*args, baseline=None, failing=('order',)):
+    """incremental.main() on the model above with the services stubbed: a service in failing fails its
+    analysis, "cancel" has the summary CANCEL, any other one no entries. baseline: the baseline report
+    (default: the chains LOCAL and THROUGH_ORDER, made by this version of the tool).
+    -> (exit code, report, stdout)"""
+    with tempfile.TemporaryDirectory() as tmp:
+        model = os.path.join(tmp, 'channels.json')
+        with open(model, 'w', encoding='utf-8') as f:
+            json.dump(MODEL, f)
+        baseline_path = os.path.join(tmp, 'baseline.json')
+        with open(baseline_path, 'w', encoding='utf-8') as f:
+            json.dump({'tool': TOOL, 'chains': [LOCAL, THROUGH_ORDER]} if baseline is None else baseline, f)
+        out = os.path.join(tmp, 'report.json')
+        cfg = {'notes': [], 'services': [{'name': 'cancel'}, {'name': 'order'}],
+               'gate': {'baseline': None, 'fail_on': 'none'},
+               'toolchain': {'micans_jar': 'micans.jar', 'java_home': 'jdk'}}
+
+        def analyse(svc, rkey, flows, base, discovery):
+            if svc in failing:
+                raise incremental.ServiceFailed('analysis failed', os.path.join(tmp, svc, 'run.log'))
+            open(flows, 'w').close()
+
+        def summarize(svc, rkey, flows, model_path, summary, base, discovery):
+            with open(summary, 'w', encoding='utf-8') as f:
+                json.dump(CANCEL if svc == 'cancel' else {'service': svc, 'droppedLibrarySinks': 0, 'entries': []},
+                          f)
+
+        patches = [
+            mock.patch.object(incremental, 'WORK', tmp),
+            mock.patch.object(incremental, 'CACHE', os.path.join(tmp, 'cache')),
+            mock.patch.object(incremental.vkr_config, 'load', return_value=cfg),
+            mock.patch.object(incremental.vkr_prepare, 'module'),
+            mock.patch.object(incremental.vkr_prepare, 'base_config', return_value=('base.yml', 'disc.json')),
+            mock.patch.object(incremental.vkr_prepare, 'tool_env', return_value=dict(os.environ)),
+            mock.patch.object(incremental, 'compile_launcher'),
+            mock.patch.object(incremental, 'tool_key', return_value=TOOL),
+            mock.patch.object(incremental, 'run_key', side_effect=lambda svc, b, d: (svc * 16)[:16]),
+            mock.patch.object(incremental, 'summary_key', return_value='s' * 16),
+            mock.patch.object(incremental, 'analyse', side_effect=analyse),
+            mock.patch.object(incremental, 'summarize', side_effect=summarize),
+            mock.patch.object(sys, 'argv', ['incremental.py', '--model', model, '--baseline', baseline_path,
+                                            '--out', out, *args]),
+        ]
+        code, stdout = 0, io.StringIO()
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            stack.enter_context(contextlib.redirect_stdout(stdout))
+            try:
+                incremental.main()
+            except SystemExit as e:
+                code = e.code
+        with open(out, encoding='utf-8') as f:
+            return code, json.load(f), stdout.getvalue()
+
+
 class FailedServiceTest(unittest.TestCase):
 
     def run_main(self, *args):
-        with tempfile.TemporaryDirectory() as tmp:
-            model = os.path.join(tmp, 'channels.json')
-            with open(model, 'w', encoding='utf-8') as f:
-                json.dump(MODEL, f)
-            baseline = os.path.join(tmp, 'baseline.json')
-            with open(baseline, 'w', encoding='utf-8') as f:
-                json.dump({'chains': [LOCAL, THROUGH_ORDER]}, f)
-            out = os.path.join(tmp, 'report.json')
-            cfg = {'notes': [], 'services': [{'name': 'cancel'}, {'name': 'order'}],
-                   'gate': {'baseline': None, 'fail_on': 'none'}}
-
-            def analyse(svc, rkey, flows, base, discovery):
-                if svc == 'order':
-                    raise incremental.ServiceFailed('analysis failed', os.path.join(tmp, 'order', 'run.log'))
-                open(flows, 'w').close()
-
-            def summarize(svc, rkey, flows, model_path, summary, base, discovery):
-                with open(summary, 'w', encoding='utf-8') as f:
-                    json.dump(CANCEL, f)
-
-            patches = [
-                mock.patch.object(incremental, 'WORK', tmp),
-                mock.patch.object(incremental, 'CACHE', os.path.join(tmp, 'cache')),
-                mock.patch.object(incremental.vkr_config, 'load', return_value=cfg),
-                mock.patch.object(incremental.vkr_prepare, 'module'),
-                mock.patch.object(incremental.vkr_prepare, 'base_config', return_value=('base.yml', 'disc.json')),
-                mock.patch.object(incremental.vkr_prepare, 'tool_env', return_value=dict(os.environ)),
-                mock.patch.object(incremental, 'compile_launcher'),
-                mock.patch.object(incremental, 'run_key', side_effect=lambda svc, b, d: (svc * 16)[:16]),
-                mock.patch.object(incremental, 'summary_key', return_value='s' * 16),
-                mock.patch.object(incremental, 'analyse', side_effect=analyse),
-                mock.patch.object(incremental, 'summarize', side_effect=summarize),
-                mock.patch.object(sys, 'argv', ['incremental.py', '--model', model, '--baseline', baseline,
-                                                '--out', out, *args]),
-            ]
-            code, stdout = 0, io.StringIO()
-            with contextlib.ExitStack() as stack:
-                for p in patches:
-                    stack.enter_context(p)
-                stack.enter_context(contextlib.redirect_stdout(stdout))
-                try:
-                    incremental.main()
-                except SystemExit as e:
-                    code = e.code
-            with open(out, encoding='utf-8') as f:
-                return code, json.load(f), stdout.getvalue()
+        return run(*args)
 
     def test_run_goes_on_and_reports_the_failed_service(self):
         code, report, stdout = self.run_main('--no-gate')

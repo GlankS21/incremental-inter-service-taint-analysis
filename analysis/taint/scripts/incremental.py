@@ -8,7 +8,8 @@ Each service is re-analysed only when something its Micans run reads has changed
 Composition is cheap and always recomputed from the summaries. Its chains to a sink are grouped
 into findings (finding_key: entry point and sink method, so the source labels and channel paths of
 one flow are one finding) and compared with a baseline report; new findings fail the run with
---gate (exit 1).
+--gate (exit 1), unless the baseline was made by another version of the tool (tool_key): a finding
+it lacks may then come from the tool rather than from the change, so it is listed but not gated.
 A service whose analysis fails does not stop the run: the report lists it under "failed", baseline
 chains through it go to "unchecked" (not "removed"), and with --gate the run exits 2.
 
@@ -84,6 +85,41 @@ def jar_classes(h, name, data):
                 h.part(f'{name}!{e.filename}', e.CRC.to_bytes(4, 'big'))
 
 
+def jar_entries(h, name, path):
+    """A jar by its entries (names and CRCs), not its bytes: a jar rebuilt from the same source (the
+    Docker image after an Actions cache eviction) differs in its zip timestamps only."""
+    with zipfile.ZipFile(path) as z:
+        for e in sorted(z.infolist(), key=lambda e: e.filename):
+            if not e.is_dir():
+                h.part(f'{name}!{e.filename}', e.CRC.to_bytes(4, 'big'))
+
+
+def tool_parts(h, root, micans_jar):
+    """The tool's part of a run key: the config generators, the launcher plugins and stubs, Micans."""
+    for s in CONFIG_SCRIPTS:
+        h.file(s, os.path.join(root, 'scripts', s))
+    h.tree('launcher', os.path.join(root, 'launcher', 'src'), '.java')
+    h.tree('jdk-stubs', os.path.join(root, 'jdk-stubs'), '.java')
+    h.tree('servlet-stubs', os.path.join(root, 'servlet-stubs'), '.java')
+    jar_entries(h, 'micans', micans_jar)
+
+
+def tool_key(root, micans_jar, extractor_jar, java_home):
+    """The version of the tool, as far as the findings depend on it: tool_parts, the summaries and the
+    composition (summarize.py, this file), the channel-extractor jar and the JDK whose library is
+    modelled (the image's base JDK moves with its tag). A baseline report made by another key is not
+    comparable with this run: a finding it lacks may come from the tool. The repository and its
+    vkr-taint.yml are not part of it: a change to them is what the gate checks."""
+    h = Hasher()
+    tool_parts(h, root, micans_jar)
+    h.file('jdk', os.path.join(java_home, 'release'))
+    for s in ('summarize.py', 'incremental.py'):
+        h.file(s, os.path.join(root, 'scripts', s))
+    if os.path.isfile(extractor_jar):
+        jar_entries(h, 'channel-extractor', extractor_jar)
+    return h.hexdigest()[:16]
+
+
 def is_shared_jar(name):
     return any(name == f'{m["artifact"]}.jar' or name.startswith(f'{m["artifact"]}-') for m in CFG['shared'])
 
@@ -106,17 +142,7 @@ def run_key(svc, base, discovery):
     # the overrides this service is given (common ones, its own, exclusions, helpers), not the file:
     # an entry for another service reruns nothing here
     h.part('overrides', json.dumps(vkr_prepare.overrides_for(CFG, svc), sort_keys=True).encode())
-    for s in CONFIG_SCRIPTS:
-        h.file(s, os.path.join(T, 'scripts', s))
-    h.tree('launcher', os.path.join(T, 'launcher', 'src'), '.java')
-    h.tree('jdk-stubs', os.path.join(T, 'jdk-stubs'), '.java')
-    h.tree('servlet-stubs', os.path.join(T, 'servlet-stubs'), '.java')
-    # entries, not bytes: a Micans jar rebuilt from the same source and patches (the Docker image after
-    # an Actions cache eviction) differs in its zip timestamps only
-    with zipfile.ZipFile(CFG['toolchain']['micans_jar']) as z:
-        for e in sorted(z.infolist(), key=lambda e: e.filename):
-            if not e.is_dir():
-                h.part(f'micans!{e.filename}', e.CRC.to_bytes(4, 'big'))
+    tool_parts(h, T, CFG['toolchain']['micans_jar'])
     h.file('jdk', os.path.join(CFG['toolchain']['java_home'], 'release'))
     h.part('cs', CFG['analysis']['context'].encode())
     return h.hexdigest()
@@ -264,7 +290,8 @@ def main():
     model = a.model or extract_model(os.path.join(WORK, 'channels.json'))
     model_json = json.load(open(model, encoding='utf-8'))
     compile_launcher()
-    report = {'services': {}}
+    tool = tool_key(T, CFG['toolchain']['micans_jar'], EXTRACTOR_JAR, CFG['toolchain']['java_home'])
+    report = {'tool': tool, 'services': {}}
     summaries, failed = [], []
     for svc in services:
         t0 = time.time()
@@ -306,8 +333,10 @@ def main():
     report['findings'] = findings
     report['seconds'] = round(time.time() - start, 1)
     new = removed = new_findings = removed_findings = []
+    tool_changed = False
     if a.baseline:
-        old = json.load(open(a.baseline, encoding='utf-8'))['chains']
+        baseline = json.load(open(a.baseline, encoding='utf-8'))
+        old = baseline['chains']
         old_keys, cur_keys = {chain_key(c) for c in old}, {chain_key(c) for c in chains}
         new = [c for c in chains if chain_key(c) not in old_keys]
         gone = [c for c in old if chain_key(c) not in cur_keys]
@@ -321,6 +350,9 @@ def main():
         new_findings = [f['key'] for f in findings if f['key'] not in old_findings]
         removed_findings = sorted({finding_key(c) for c in removed} - cur_findings)
         report['newFindings'], report['removedFindings'] = new_findings, removed_findings
+        # a report of 1.4 and older has no tool key: another version
+        report['baselineTool'] = baseline.get('tool')
+        report['toolChanged'] = tool_changed = report['baselineTool'] != tool
     with open(a.out, 'w', encoding='utf-8') as f:
         json.dump(report, f, indent=1)
     crossing = sum('-->' in c for c in chains)
@@ -330,9 +362,12 @@ def main():
           + f'; {report["seconds"]:.0f} s total -> {a.out}')
     for k in new_findings:
         print('NEW', k)
+    if tool_changed and new_findings:
+        print(f'the baseline was made by another version of the tool ({report["baselineTool"] or "unknown"}, '
+              f'now {tool}): the {len(new_findings)} new finding(s) may come from the tool and do not fail the gate')
     if failed:
         print(f'{len(failed)} of {len(services)} services FAILED, their chains are missing: {", ".join(failed)}')
-    if gate and new_findings:
+    if gate and new_findings and not tool_changed:
         sys.exit(1)
     if gate and failed:
         sys.exit(2)  # an incomplete analysis must not pass the gate

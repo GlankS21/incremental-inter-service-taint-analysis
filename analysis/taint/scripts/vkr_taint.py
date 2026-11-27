@@ -14,8 +14,8 @@
    the channel model (HTTP, AMQP, shared tables) into chains from an endpoint to a sink
 4. <out>/vkr-taint-report.json and <out>/vkr-taint.sarif (with --baseline: baselineState new/unchanged)
 
-exit: 0, or with --gate (or gate.fail-on: new-chains) 1 on new findings and 2 when a service failed;
-      3 on a configuration or build error
+exit: 0, or with --gate (or gate.fail-on: new-chains) 1 on new findings (unless the baseline was made
+      by another version of the tool) and 2 when a service failed; 3 on a configuration or build error
 env:  JAVA_HOME (JDK 21+ running Micans), VKR_MICANS_JAR (the patched Micans jar),
       VKR_CHANNEL_EXTRACTOR (channel-extractor jar, default: analysis/channel-extractor/target),
       VKR_WORK (work dir with the cache, default ~/.cache/vkr-taint/<repo>-<hash>), VKR_HEAP (default 8g)

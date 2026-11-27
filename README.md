@@ -47,7 +47,7 @@ What the action does:
 - **Runs with caching.** It builds the tool image and keeps the layers in the Actions cache. It also restores the analysis cache of the latest run.
 - **Compares pull requests with a baseline.** On a pull request, it compares the result with the baseline that the last push to the baseline branch stored.
 - **Reports.** It uploads the chains as SARIF to code scanning and writes a summary to the job page.
-- **Gates.** With `gate: 'true'`, it fails on a finding that the baseline does not have, or on a service that could not be analysed.
+- **Gates.** With `gate: 'true'`, it fails on a finding that the baseline does not have, or on a service that could not be analysed. After an upgrade of DeltaTaint, a baseline of the previous version does not fail on new findings, since they may come from the tool: the job shows a warning until a push to the baseline branch stores a baseline of the new version.
 
 The first run is a full analysis, which takes minutes per service. Later runs re-analyse only the
 changed services. The example workflow at [`.github/workflows/taint.yml`](.github/workflows/taint.yml)

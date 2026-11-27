@@ -67,7 +67,9 @@ The action:
   branch;
 - uploads `vkr-taint.sarif` to code scanning;
 - fails with `gate: 'true'` (the default) on a new finding or on a service that could not
-  be analysed.
+  be analysed. Against a baseline made by another version of DeltaTaint, new findings do not fail:
+  they may come from the tool rather than from the change. The job shows a warning, and the next
+  push to the default branch stores a baseline of the new version.
 
 [`.github/workflows/taint.yml`](../.github/workflows/taint.yml) runs it on the testbed of this
 repository. The first run of a system is a full analysis, which takes minutes per service.
@@ -190,6 +192,11 @@ Fields of `vkr-taint-report.json`:
 
 - `chains`: every chain to a sink;
 - `findings`: the chains grouped by entry point and sink method (`key`, `chains`);
+- `tool`: the version of the tool that made the report, a hash of what the findings depend on (the
+  scripts, the launcher plugins and stubs, Micans, the channel extractor and the JDK);
+- `baselineTool`, `toolChanged`: the `tool` of the baseline (none in reports of 1.4 and older) and
+  whether it differs from this run's. If it differs, new findings do not fail the gate, so a
+  `gate.baseline` file has to be regenerated after an upgrade;
 - `newFindings`, `removedFindings`: finding keys compared with `--baseline`, which the gate uses;
 - `new`, `removed`: chains compared with `--baseline`;
 - `unchecked`: baseline chains through a service that failed now;
@@ -208,7 +215,7 @@ In `vkr-taint.sarif`:
 | Exit code | |
 |---|---|
 | 0 | done (and with `--gate`: no new finding, every service analysed) |
-| 1 | `--gate`: new findings |
+| 1 | `--gate`: new findings against a baseline of the same version of the tool |
 | 2 | `--gate`: a service could not be analysed, so its chains are missing |
 | 3 | configuration or build error |
 
