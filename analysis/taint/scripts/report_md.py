@@ -86,7 +86,11 @@ def main():
               'not fail the gate in this run. The next push to the baseline branch stores a baseline of this '
               'version (a `gate.baseline` file has to be regenerated).')
     if r.get('failed'):
-        print(f'\n> **{len(r["failed"])} service(s) not analysed, their chains are missing:** {", ".join(code(x) for x in r["failed"])}')
+        print(f'\n> **{len(r["failed"])} service(s) not analysed, their chains are missing:**')
+        for svc in r['failed']:
+            s = r['services'].get(svc, {})
+            log = f'; its log is {code(s["log"])} in the `vkr-taint-report` artifact' if s.get('log') else ''
+            print(f'> - {code(svc)}: {html.escape(s.get("failed") or "failed")}{log}')
 
     if findings:
         print('\n| # | | CWE | Entry point | Source | Through | Sink | Chains |\n|---|---|---|---|---|---|---|---|')

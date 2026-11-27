@@ -28,6 +28,13 @@
   changes, the new `throughDatabase` marks a DB hop, and the message names the stored field. The
   testbed's base commit: 16 chains, "6 across a channel" → "0 across services, 6 through the
   database"; train-ticket: 106 of 243 chains across services, as before.
+- **A service that could not be analysed says why, and its log is kept.** The reason used to be
+  "analysis failed", and the log stayed in a workdir that the action does not keep. The reason now
+  tells out of memory (raise the heap) from a process killed for lack of memory (exit 137: lower
+  it), a stack overflow, or the exit status, and the log is copied next to the report as
+  `vkr-taint-logs/<service>.log`, which the action uploads in the `vkr-taint-report` artifact.
+  Securibench Micro with a 256m heap: "analysis failed" and no log in the output → "out of memory:
+  the Java heap (256m) is too small" and `vkr-taint-logs/securibench-micro.log`.
 
 ### Changed
 - One table, `analysis/taint/scripts/cwe.py`, describes every built-in catalogue: the name a
