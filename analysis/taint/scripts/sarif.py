@@ -17,7 +17,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cwe  # noqa: E402
-from incremental import finding_key, group_findings  # noqa: E402
+from incremental import chain_services, crosses_services, finding_key, group_findings, through_database  # noqa: E402
 
 SINK = re.compile(r'\s+(CWE-\d+) @ ([\w$.]+)#([\w$<>]+):(\d+)$')
 EDGE = re.compile(r'\s+--(\w+) (.*?)-->\s+')
@@ -143,7 +143,9 @@ def to_sarif(report, model, root, baseline=None, uri_base=None):
         nodes, edges, cwe_id, cls, method, line = parse(main)
         sink, _ = code_flow(main)
         flows = [f for f in (code_flow(c)[1] for c in [main] + [c for c in chains if c != main]) if f]
-        services = [n[1] for n in nodes]
+        services = chain_services(main)
+        # the entity fields of the DB hops: stored by one request, read back by another
+        stored = list(dict.fromkeys(n[3] or n[2] for (kind, _), n in zip(edges, nodes[1:]) if kind == 'DB'))
         entry = nodes[0]
         sources = source_labels(chains)
         known = cwe.BY_ID.get(cwe_id)
@@ -153,12 +155,14 @@ def to_sarif(report, model, root, baseline=None, uri_base=None):
             'message': {'text': f'{known.title if known else cwe_id}: {entry[2]} ({entry[1]}) reaches '
                                 f'{cls}#{method}' + (f' across {len(services) - 1} service call(s): '
                                                      f'{" -> ".join(services)}' if len(services) > 1 else '')
+                                + (f' through the database ({", ".join(stored)})' if stored else '')
                                 + (f'; source {", ".join(sources)}' if sources else '')
                                 + (f' ({len(chains)} chains)' if len(chains) > 1 else '')},
             'locations': [sink],
             'partialFingerprints': {'vkrFinding/v1': hashlib.sha256(finding['key'].encode()).hexdigest()},
             'properties': {'finding': finding['key'], 'chains': chains,
-                           'crossService': any('-->' in c for c in chains)},
+                           'crossService': any(map(crosses_services, chains)),
+                           'throughDatabase': any(map(through_database, chains))},
         }
         if flows:
             result['codeFlows'] = [{'threadFlows': [{'locations': [{'location': l} for l in f]}]} for f in flows]
