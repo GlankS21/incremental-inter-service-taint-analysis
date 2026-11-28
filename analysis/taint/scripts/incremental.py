@@ -166,16 +166,18 @@ def finding_key(chain):
 
 HOP = re.compile(r'\s+--(\w+) .*?-->\s+')  # a channel hop of a chain; its kind: HTTP, AMQP or DB
 SINK_AT = re.compile(r'\s+CWE-\d+ @ ')
+NODE_SERVICE = re.compile(r'\w+:([^:\s]+):')  # ep:<service>:GET /x <0>, db:<service>:Order <Order.note>
 
 
 def chain_services(chain):
     """The services a chain passes through, in order. A hop within one service (a row stored by one
-    request and read by another) adds none."""
+    request and read by another) adds none, nor does an entry point named by its class and method
+    (Class#doPost <getParameter>, a servlet's call source), which names no service."""
     services = []
     for node in HOP.split(chain[:SINK_AT.search(chain).start()])[0::2]:
-        service = node.split(':')[1]
-        if not services or services[-1] != service:
-            services.append(service)
+        named = NODE_SERVICE.match(node)
+        if named and (not services or services[-1] != named.group(1)):
+            services.append(named.group(1))
     return services
 
 

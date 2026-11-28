@@ -24,6 +24,9 @@ SHARED_TABLE = ('ep:admin:POST /notes <0>  --DB Note [Note.text]-->  db:report:N
                 'CWE-89 @ ReportRepository#search:12')
 HTTP_THEN_DB = ('ep:gw:POST /orders <0/note>  --HTTP /api/orders-->  ep:order-service:POST /api/orders <0/note>  '
                 '--DB Order [Order.note]-->  db:order-service:Order <Order.note>  CWE-89 @ OrderQuery#find:7')
+# a servlet application's call source: the entry point is the method that reads the request, no service
+SERVLET = ('org.owasp.benchmark.helpers.SeparateClassRequest#getTheParameter <getParameter>  '
+           'CWE-22 @ BenchmarkTest00040#doPost:49')
 
 
 class ChainServicesTest(unittest.TestCase):
@@ -40,6 +43,10 @@ class ChainServicesTest(unittest.TestCase):
     def test_through_the_database(self):
         self.assertEqual([incremental.through_database(c) for c in (LOCAL, HTTP, DB, SHARED_TABLE, HTTP_THEN_DB)],
                          [False, False, True, True, True])
+
+    def test_a_servlet_entry_names_no_service(self):
+        self.assertEqual((incremental.chain_services(SERVLET), incremental.crosses_services(SERVLET),
+                          incremental.through_database(SERVLET)), ([], False, False))
 
 
 class SarifTest(unittest.TestCase):
@@ -63,18 +70,24 @@ class SarifTest(unittest.TestCase):
         text = self.result(HTTP_THEN_DB)['message']['text']
         self.assertIn('across 1 service call(s): gw -> order-service through the database (Order.note)', text)
 
+    def test_a_servlet_chain(self):
+        r = self.result(SERVLET)
+        self.assertTrue(r['message']['text'].startswith('Path traversal'), r['message']['text'])
+        self.assertTrue(r['message']['text'].endswith('reaches BenchmarkTest00040#doPost'), r['message']['text'])
+        self.assertEqual((r['properties']['crossService'], r['properties']['throughDatabase']), (False, False))
+
 
 class SummaryTest(unittest.TestCase):
 
     def test_the_job_summary_counts_service_calls_and_db_hops_apart(self):
-        report = {'chains': [LOCAL, HTTP, DB], 'seconds': 0, 'services': {}}
+        report = {'chains': [LOCAL, HTTP, DB, SERVLET], 'seconds': 0, 'services': {}}
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, 'r.json')
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(report, f)
             out = subprocess.run([sys.executable, '-I', os.path.join(SCRIPTS, 'report_md.py'), path],
                                  capture_output=True, text=True, encoding='utf-8', check=True).stdout
-        self.assertIn('(3 chains to a sink: 1 across services, 1 through the database)', out)
+        self.assertIn('(4 chains to a sink: 1 across services, 1 through the database)', out)
 
 
 if __name__ == '__main__':
