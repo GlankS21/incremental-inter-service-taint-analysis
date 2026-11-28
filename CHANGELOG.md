@@ -52,6 +52,11 @@
 - One table, `analysis/taint/scripts/cwe.py`, describes every built-in catalogue: the name a
   configuration lists, how a sink call is recognised, and its SARIF rule. The configuration check,
   the generated configuration, the summaries and the SARIF writer read it, so they cannot disagree.
+- The tests of the launcher plugins (`analysis/taint/launcher/test`, 17 JUnit tests) run in CI, in
+  the image the action builds; they used to run only by hand.
+- `analysis/experiments/public/run_gate.sh <tag>` runs Juliet, Securibench Micro and OWASP
+  BenchmarkJava, scores them and checks the regression gate in one command (about 18 minutes).
+  On this release: the gate passes, with the scores of the baseline in every group.
 
 ## 1.4.0
 
