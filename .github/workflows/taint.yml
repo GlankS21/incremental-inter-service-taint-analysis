@@ -38,8 +38,8 @@ jobs:
           python3 -I -m unittest discover -s analysis/taint/tests -p "test_*.py"
           python3 -I -m unittest discover -s analysis/experiments -p "test_*.py"
 
-      # the launcher plugin tests (analysis/taint/launcher/test/run_tests.py) compile against the Micans
-      # jar, which only the tool image builds: they run locally with MICANS_JAR set
+      # the launcher plugin tests compile against the Micans jar, which only the tool image holds: they
+      # run in the taint job, after the action has built the image
 
       - name: Channel extractor
         working-directory: analysis/channel-extractor
@@ -72,3 +72,11 @@ jobs:
           config: analysis/taint/config/ecommerce.vkr-taint.yml
           # a pull request from a fork gets no security-events permission: its report stays an artifact
           upload-sarif: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+
+      # in the image the action built (its JDK, its Micans jar and its copy of analysis/); also after
+      # a gate failure, which leaves the image in place
+      - name: Launcher plugin tests
+        if: ${{ !cancelled() }}
+        run: >-
+          docker run --rm --entrypoint python3 -e MICANS_JAR=/opt/micans/micans.jar vkr-taint:action
+          -I /opt/vkr/taint/launcher/test/run_tests.py

@@ -319,7 +319,8 @@ need.
   - Public suites, scored per test case and checked by a regression gate
     ([`precision_gate.py`](experiments/public/precision_gate.py)): a change to the analysis may not
     lose a true positive or add a false positive in any category of any suite against
-    [`results/gate-baseline.json`](experiments/public/results/gate-baseline.json).
+    [`results/gate-baseline.json`](experiments/public/results/gate-baseline.json);
+    [`run_gate.sh`](experiments/public/run_gate.sh) runs the three suites and the gate.
     - OWASP BenchmarkJava (sqli, xss, cmdi, pathtraver)
       ([`results/benchmarkjava-per-test.csv`](experiments/public/results/benchmarkjava-per-test.csv)):
       777 of 777 vulnerable tests found (TPR 100 %), 0 of 701 safe tests reported (FPR 0.0 %).
@@ -375,6 +376,7 @@ way is identical, class for class, to the one used for the measurements.
 | Public systems: one run | `experiments/public/build_public.sh` builds a clone in a container; the configs are next to it |
 | Commit history replay | `experiments/public/replay.sh <repo> <first> <last> <maven image>`: per commit, a container build when build input changed, an incremental run, and at the end a cold run on the last commit for the equivalence check; data goes to `$VKR_EXP/replay/<repo>/` |
 | Seeded MyBatis vulnerabilities in mall-swarm | `experiments/public/seeds/` |
+| Regression gate of the public suites | `experiments/public/run_gate.sh <tag>` with `VKR_EXP` holding the built suites: runs Juliet, Securibench Micro and BenchmarkJava, scores them and compares with `results/gate-baseline.json` (about 18 minutes) |
 
 ## Layout
 
@@ -385,7 +387,8 @@ analysis/
   channel-extractor/         channel model from sources (Java, Maven)
   taint/scripts/             vkr_taint.py (CLI), incremental.py (cache, composition), vkr_config.py,
                              gen_taint_config.py, summarize.py, sarif.py, run_taint.sh, prepare.sh
-  taint/launcher/            Micans entry point with the vkr plugins (compiled at run time)
+  taint/launcher/            Micans entry point with the vkr plugins (compiled at run time); their
+                             tests: python3 analysis/taint/launcher/test/run_tests.py (MICANS_JAR set)
   taint/patches/             Micans patches and build_micans.sh
   taint/config/              configuration of the testbed
   taint/tests/               unit tests: python3 -m unittest discover -s analysis/taint/tests
