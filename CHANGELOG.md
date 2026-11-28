@@ -177,6 +177,70 @@ service only for the configuration it is given.
   branch changes, the first push to the new one stores a baseline. Until then, pull requests list
   findings without comparing them.
 
-## 1.1.0 and 1.0.0
+## 1.1.0
 
-See the [release notes](https://github.com/GlankS21/incremental-inter-service-taint-analysis/releases).
+DeltaTaint 1.1.0 adds servlet applications, two sink catalogues and fewer false positives from
+constant branches.
+
+### New
+- **Servlet applications.** A war whose classes extend `HttpServlet` (javax or jakarta) is analysed
+  as a service:
+  - `doGet`/`doPost`/... are entry points;
+  - the request getters (`getParameter`, `getHeader`, `getCookies`, ...) are sources;
+  - libraries are read from `WEB-INF/lib`;
+  - when the war does not package the Servlet API (scope `provided`), signature-only stubs are used.
+- **New sink catalogues:**
+  - `cwe-78` (OS command injection): `Runtime.exec` and `ProcessBuilder`;
+  - `cwe-22` (path traversal): `File` and stream constructors, and `Paths.get`.
+- **`cwe-89`** also covers plain JDBC statement text (`Statement.execute*`/`addBatch`,
+  `Connection.prepare*`) and `JdbcTemplate.batchUpdate`.
+
+### Improved
+- **`cwe-117`:** the SLF4J log message is a sink, also when it is built by concatenation
+  (`log.info("code " + code)`). Before, only the `{}` arguments were.
+- **Constant branches:** code behind an `if`, ternary or `switch` whose condition is constant inside
+  the method is dropped before the analysis, including `"ABC".charAt(1)` and integer casts. The
+  points-to analysis is flow-insensitive, so such code used to be reported.
+
+### Results
+OWASP BenchmarkJava, scored on four categories (sqli, xss, cmdi, pathtraver) as TPR − FPR:
+
+| | TPR | FPR | Score |
+|---|---|---|---|
+| servlet support alone | 94.6 % | 54.5 % | +40.1 |
+| 1.1.0 | 94.6 % | 20.1 % | **+74.5** |
+
+- The ecommerce testbed gives the same chains as before.
+- The remaining false positives come from a list element taken at another index or a map value
+  read under another key; these are not handled yet.
+
+### Upgrading
+- `@v1` pointed to this release. Pin `@v1.1.0` for a fixed version.
+- The analysis cache key includes the tool version. The first run after upgrading is therefore a
+  full analysis, about 4–6 minutes per service on a hosted runner. Later runs re-analyse only the
+  services that changed.
+
+Pull requests: #11 (log message sink), #12 (servlet applications, `cwe-78` and `cwe-22`), #15 and #16
+(constant branches).
+
+## 1.0.0
+
+The first public release of DeltaTaint: incremental inter-service taint analysis of Java Spring
+Cloud microservices in CI. (The release notes of 1.0.0 and 1.1.0 were deleted with their GitHub
+releases; these two sections are rebuilt from them and from the code at the tagged commits.)
+
+- **Chains across services.** A chain runs from an externally reachable endpoint to a sink, through
+  other services over HTTP (OpenFeign, `RestTemplate`), RabbitMQ (with the transactional outbox and
+  dead-letter routing) or a database table that services share.
+- **Incremental.** Only the services whose analysis inputs changed are re-analysed. The cache is
+  keyed by the hash of each service's classes, shared modules, library jars, generated
+  configuration and tool version.
+- **Reports.** The chains go to GitHub code scanning as SARIF and to the job page as a summary.
+- **Gate.** Pull requests are compared with a baseline that pushes to the default branch store;
+  with `gate: 'true'`, a new finding fails the job.
+- **Sink catalogues:** SQL injection (`cwe-89`), log injection (`cwe-117`), XSS (`cwe-79`),
+  server-side request forgery (`cwe-918`) and template injection (`cwe-1336`).
+- **Projects:** Maven multi-module Spring Cloud systems; the Gradle output layout is also read.
+- Analysis is done by Micans, built from its published source (AGPL-3.0, Zenodo
+  10.5281/zenodo.15050505) inside the action's image. A chain is a candidate, not a proof: precision
+  is that of a 1-call context-sensitive pointer analysis.
