@@ -299,6 +299,8 @@ def load(path=None, env=None, require=()):
             p = _abs(base, s)
             if not os.path.isfile(p):
                 errors.append(f'taint.sinks: catalogue file not found: {p}')
+            else:
+                errors += [f'taint.sinks: {p}: {e}' for e in sink_cwe_errors(p)]
             resolved_sinks.append(p)
         else:
             errors.append(f'taint.sinks: unknown catalogue "{s}" (built-in: {", ".join(KNOWN_SINKS)}, '
@@ -443,6 +445,20 @@ def _modules(spec, kind, kinds, by_name, root, base, errors, cfg):
 OVERRIDE_SECTIONS = ('sources', 'sinks', 'transfers', 'sanitizers')
 
 
+def sink_cwe_errors(path):
+    """The cwe values of a catalogue file (its own and its sinks') that are no CWE id."""
+    try:
+        doc = vkr_yaml.load(path) or {}
+    except vkr_yaml.YamlError as e:
+        return [str(e)]
+    if not isinstance(doc, dict) or not isinstance(doc.get('sinks') or [], list):
+        return ['expected a Tai-e taint config with a sinks: list']
+    errs = [f'cwe must look like CWE-89, got {doc["cwe"]!r}'] if 'cwe' in doc and not cwe.normalize(doc['cwe']) else []
+    return errs + [f'sinks[{i}]: cwe must look like CWE-89, got {e["cwe"]!r}'
+                   for i, e in enumerate(doc.get('sinks') or []) if isinstance(e, dict) and 'cwe' in e
+                   and not cwe.normalize(e['cwe'])]
+
+
 def load_overrides(path):
     """Tai-e taint-config YAML, merged last into every generated config, with two extensions:
       services: {<name>: {sources|sinks|transfers|sanitizers: [...]}}   entries for one service only
@@ -465,6 +481,9 @@ def load_overrides(path):
             if not isinstance(v, list) or not all(isinstance(e, dict) for e in v):
                 errs.append(f'{where}{sec}: expected a list of mappings')
                 continue
+            if sec == 'sinks':
+                errs.extend(f'{where}sinks[{i}]: cwe must look like CWE-89, got {e["cwe"]!r}'
+                            for i, e in enumerate(v) if 'cwe' in e and not cwe.normalize(e['cwe']))
             out[sec] = v
         return out
 

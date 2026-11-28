@@ -51,6 +51,11 @@ REST_TEMPLATE_CALL = re.compile(r'\.(exchange|postForObject|postForEntity|getFor
 # the CWE of a sink call of a built-in catalogue: cwe.of_call (method name), cwe.of_constructor
 # MyBatis mapper methods whose XML statement splices a parameter with ${} (gen_taint_config.py)
 MYBATIS_METHODS = {m for _, m in DISCOVERY.get('mybatisSinks', [])}
+# sinks the configuration declares (a catalogue file of taint.sinks, the overrides): method name ->
+# [(class as an internal name, the CWE the sink names or None)]
+DECLARED_SINKS = {}
+for _s in DISCOVERY.get('declaredSinks', []):
+    DECLARED_SINKS.setdefault(_s['name'], []).append((_s['class'].replace('.', '/'), _s['cwe']))
 
 
 def is_entity(cls):
@@ -84,6 +89,37 @@ def constructed(classpath, cls, method):
         elif inside and (m := re.search(r'// Method (\S+)\."<init>"', line)):
             found.add(m.group(1))
     return found
+
+
+def invoked(classpath, cls, method, name):
+    """Classes (internal names) whose method `name` cls#method calls; empty when javap cannot tell."""
+    key = (classpath, cls, '-c')
+    if key not in _javap_cache:
+        try:
+            _javap_cache[key] = subprocess.run([JAVAP, '-p', '-c', '-cp', classpath, cls],
+                                               capture_output=True, text=True).stdout
+        except OSError:
+            _javap_cache[key] = ''
+    found, inside = set(), False
+    for line in _javap_cache[key].splitlines():
+        if line.startswith('  ') and not line.startswith('    ') and '(' in line:  # a method declaration
+            inside = re.search(rf'[ .]{re.escape(method)}\(', line) is not None
+        elif inside and (m := re.search(rf'// (?:Interface)?Method (\S+)\.{re.escape(name)}:', line)):
+            found.add(m.group(1))
+    return found
+
+
+def declared_cwe(candidates, owners, builtin):
+    """The CWE of a sink call that the configuration may declare: candidates are the declared sinks
+    of the callee's name, owners the classes the call may go to (empty: unknown), builtin the CWE of
+    the catalogues. A declared sink of the call's class wins with the CWE it names; one of another
+    class only fills in for a call of no catalogue. -> CWE, or None when the call is not declared"""
+    exact = [c for cls, c in candidates if cls in owners]
+    if exact:
+        return next((c for c in exact if c), None) or builtin or cwe.DECLARED
+    if builtin or not candidates:
+        return builtin
+    return next((c for _, c in candidates if c), None) or cwe.DECLARED
 
 
 def record_fields(classpath, cls):
@@ -235,7 +271,10 @@ def summary(service, log_path, model_path, out_path, app_dir, common_dir):
         site = f'{sink_cls.rsplit(".", 1)[1]}#{sink_m}:{sink_line}'
         ctor = CTOR_CALL.search(call)
         callee = re.search(r'\.(\w+)\(', call).group(1) if not ctor else '<init>'
-        ctor_cwe = cwe.of_constructor(constructed(app_dir, sink_cls, sink_m)) if ctor else None
+        made = constructed(app_dir, sink_cls, sink_m) if ctor else set()
+        ctor_cwe = cwe.of_constructor(made) if ctor else None
+        if ctor and DECLARED_SINKS.get('<init>'):  # a declared constructor: its class is known
+            ctor_cwe = declared_cwe([c for c in DECLARED_SINKS['<init>'] if c[0] in made], made, ctor_cwe)
         if ctor_cwe:
             exits = [{'kind': 'LOCAL', 'cwe': ctor_cwe, 'site': site}]
         elif ctor:
@@ -259,7 +298,9 @@ def summary(service, log_path, model_path, out_path, app_dir, common_dir):
                     and p['origin']['method'] == sink_m]
             exits = [{'kind': 'CHANNEL', 'channel': min(pubs, key=lambda p: abs(p['origin']['line'] - sink_line))['id'],
                       'coarse': True}] if pubs else []
-        elif local := cwe.of_call(call, sql=callee in MYBATIS_METHODS):
+        elif local := declared_cwe(DECLARED_SINKS.get(callee, []),
+                                   invoked(app_dir, sink_cls, sink_m, callee) if callee in DECLARED_SINKS else set(),
+                                   cwe.of_call(call, sql=callee in MYBATIS_METHODS)):
             exits = [{'kind': 'LOCAL', 'cwe': local, 'site': site}]
         else:
             exits = [{'kind': 'UNKNOWN', 'site': site, 'call': call}]

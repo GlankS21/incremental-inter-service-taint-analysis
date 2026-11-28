@@ -30,6 +30,7 @@ import sys
 import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cwe  # noqa: E402
 import vkr_config  # noqa: E402
 from vkr_yaml import dump_entry  # noqa: E402
 
@@ -873,7 +874,7 @@ def generate(cfg, model, module, java_home):
     if amqp:
         sink_groups.append(('outgoing AMQP channel' + (' (transactional outbox: enqueue = send)' if outbox_pubs else ''),
                             amqp))
-    mybatis_methods = []
+    mybatis_methods, declared = [], []
     for cat in cfg['taint']['sinks']:
         if cat in CATALOGUES:
             for title, entries in CATALOGUES[cat]:
@@ -886,7 +887,10 @@ def generate(cfg, model, module, java_home):
                     sink_groups.append(('SQL injection: MyBatis ${} substitution', mb))
         else:
             from vkr_yaml import load
-            sink_groups.append((f'catalogue {os.path.basename(cat)}', (load(cat) or {}).get('sinks') or []))
+            doc = load(cat) or {}
+            sink_groups.append((f'catalogue {os.path.basename(cat)}', doc.get('sinks') or []))
+            # summarize.py reports a flow into one of these as the CWE it names (cwe.declared)
+            declared += cwe.declared(doc.get('sinks') or [], cwe.normalize(doc['cwe']) if doc.get('cwe') else None)
     if servlet_ns and 'cwe-79' in cfg['taint']['sinks']:
         sink_groups.append(('XSS (CWE-79): the text a servlet writes to its response writer', SERVLET_SINKS))
 
@@ -953,6 +957,8 @@ def generate(cfg, model, module, java_home):
                  'dtoClasses': sorted(dto_classes), 'eventPackages': event_packages, 'eventClasses': event_classes,
                  'entityPackages': entity_packages, 'entityClasses': entity_classes,
                  'outboxSinks': outbox_sinks, 'mybatisSinks': mybatis_methods, 'notes': notes}
+    if declared:  # only then: the run key hashes this file
+        discovery['declaredSinks'] = declared
     return '\n'.join(lines) + '\n', discovery, notes
 
 

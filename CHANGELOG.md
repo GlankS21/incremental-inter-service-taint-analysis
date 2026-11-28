@@ -35,6 +35,18 @@
   `vkr-taint-logs/<service>.log`, which the action uploads in the `vkr-taint-report` artifact.
   Securibench Micro with a 256m heap: "analysis failed" and no log in the output → "out of memory:
   the Java heap (256m) is too small" and `vkr-taint-logs/securibench-micro.log`.
+- **A sink that the configuration declares is reported, with the CWE it names.** The analysis
+  found the flows into a sink of a catalogue file in `taint.sinks` or of the overrides' `sinks`, but
+  the report dropped them unless the method name was a built-in catalogue's, and then gave them
+  that catalogue's CWE: an XPath query (`evaluate`) was template injection. A sink, or its file, now
+  names its weakness with `cwe: CWE-643`; a sink without one keeps the CWE of a catalogue of the same
+  method name, else it is CWE-74 under the new `DeclaredSink` rule. A declared sink of the class the
+  call goes to wins over a catalogue. A `cwe` that is not of the form `CWE-89` is a configuration
+  error. OWASP BenchmarkJava, its configuration plus a file of LDAP and XPath sinks: LDAP injection
+  0 → 27 of 27 vulnerable tests found (14 when the file declares only `DirContext.search`, not
+  `InitialDirContext.search`), XPath injection 0 → 15 of 15, the 7 XPath tests reported as template
+  injection now CWE-643; no false positive, the four scored categories unchanged (777 of 777).
+  Without declared sinks the findings do not change.
 
 ### Changed
 - One table, `analysis/taint/scripts/cwe.py`, describes every built-in catalogue: the name a

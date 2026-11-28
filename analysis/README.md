@@ -177,6 +177,27 @@ Without a `vkr-taint.yml`, every catalogue is enabled. A file that leaves out `t
 with its own level and `security-severity` (`cwe-117` a warning, the others errors; the names and
 values are in [`taint/scripts/cwe.py`](taint/scripts/cwe.py)).
 
+Other sinks are declared in a Tai-e taint yml file listed in `taint.sinks`, or in the `sinks:` of
+the overrides. A sink may name its weakness with `cwe:`, and a file of `taint.sinks` may name one
+for all its sinks:
+
+```yaml
+cwe: CWE-643                      # XPath injection, for the sinks below without a cwe of their own
+sinks:
+  - { method: "<javax.xml.xpath.XPath: javax.xml.xpath.XPathExpression compile(java.lang.String)>", index: 0 }
+  - { method: "<javax.naming.directory.DirContext: javax.naming.NamingEnumeration search(java.lang.String,java.lang.String,javax.naming.directory.SearchControls)>", index: 1, cwe: CWE-90 }
+```
+
+A flow into a declared sink is reported with that CWE. A declared sink without one keeps the CWE
+of a catalogue whose method name it shares, else it is CWE-74 (injection, rule `DeclaredSink`).
+When the classes show which class the call goes to (`javap`), a declared sink of that class wins
+over a catalogue of the same method name: `XPath.evaluate` is not template injection.
+
+Tai-e matches the method that a call resolves to: `DirContext.search` does not cover a call on an
+`InitialDirContext`. Declare the class the code calls, or mark the interface with `^`
+(`DirContext^`) for every class that implements it; Tai-e does not take `^` for a method with an
+array parameter.
+
 Examples: [`taint/config/ecommerce.vkr-taint.yml`](taint/config/ecommerce.vkr-taint.yml) (the
 testbed); [`experiments/public/*.vkr-taint.yml`](experiments/public) (train-ticket, mall-swarm,
 OWASP BenchmarkJava, Securibench Micro).
@@ -264,7 +285,8 @@ need.
   endpoint id (a finding names `Class#method`), and Kotlin Feign clients and listeners are not seen.
 - **Servlets:** one war is one service; servlet filters, JSPs and `web.xml` mappings are not read, and
   `HttpSession` attributes are not followed.
-- **Sinks:** only the catalogues above are built in. Others can be given as Tai-e taint yml files.
+- **Sinks:** only the catalogues above are built in. Others can be declared in Tai-e taint yml
+  files, with the CWE they report.
 - **Cost:**
   - a commit that changes a shared module or a library version re-analyses every service that
     packages it, and that run is about as long as a full one;

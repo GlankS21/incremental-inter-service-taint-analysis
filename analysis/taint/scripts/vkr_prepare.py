@@ -18,6 +18,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cwe  # noqa: E402
 import gen_taint_config  # noqa: E402
 import vkr_config  # noqa: E402
 import vkr_yaml  # noqa: E402
@@ -68,6 +69,10 @@ def base_config(cfg, model, name, out_dir):
             raise vkr_config.ConfigError(f'taint.base-config: {hand} not found for {name}')
         text = open(hand, encoding='utf-8').read()
         disc['baseConfig'] = hand
+    # the overrides' sinks are declared too (merged into the config later, by taint_configs)
+    declared = disc.get('declaredSinks', []) + cwe.declared(overrides_for(cfg, name)[0].get('sinks') or [])
+    if declared:  # only then: the run key hashes this file
+        disc['declaredSinks'] = declared
     base = os.path.join(out_dir, 'taint-base.yml')
     with open(base, 'w', encoding='utf-8', newline='\n') as f:
         f.write(text)
