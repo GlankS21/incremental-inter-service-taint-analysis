@@ -88,3 +88,33 @@ def of_constructor(constructed):
         if any(owner in constructed for owner in c.constructors):
             return c.id
     return None
+
+
+# ------------------------------------------------------------------ sinks the configuration declares
+
+# the CWE of a declared sink (a catalogue file of taint.sinks, the sinks of the overrides) that names
+# none and is no call of a catalogue: injection, the parent of the catalogues' CWEs
+DECLARED = 'CWE-74'
+DECLARED_RULE = ('DeclaredSink', 'Tainted data reaches a declared sink',
+                 'Untrusted input reaches a sink that the configuration declares (a catalogue file or the '
+                 'overrides of vkr-taint.yml); give the sink a cwe to name its weakness.')
+SIGNATURE = re.compile(r'<([^:]+): \S+ ([^(]+)\(')
+
+
+def normalize(value):
+    """'cwe-90', 'CWE-90' -> 'CWE-90'; anything else -> None."""
+    m = re.fullmatch(r'(?i)cwe-(\d+)', str(value).strip())
+    return f'CWE-{m.group(1)}' if m else None
+
+
+def declared(entries, default=None):
+    """The sinks of a Tai-e taint config ({method, index, cwe?}): [{class, name, cwe}] with the class
+    (dotted, without the subtype mark ^), the method name (<init> for a constructor) and the CWE the
+    entry names, else default (the file's), else None."""
+    out = []
+    for e in entries:
+        m = SIGNATURE.match(str(e.get('method', '')))
+        if m:
+            out.append({'class': m.group(1).rstrip('^'), 'name': m.group(2),
+                        'cwe': normalize(e['cwe']) if e.get('cwe') else default})
+    return out

@@ -68,7 +68,8 @@ def git_root(path):
 def rule(rule_id):
     """The SARIF rule of a CWE: its entry of the built-in catalogues (cwe.py), else only the id."""
     c = cwe.BY_ID.get(rule_id)
-    name, title, description = (c.rule, c.title, c.description) if c else (rule_id, rule_id, rule_id)
+    name, title, description = (c.rule, c.title, c.description) if c else (
+        cwe.DECLARED_RULE if rule_id == cwe.DECLARED else (rule_id, rule_id, rule_id))
     return {'id': rule_id, 'name': name,
             'shortDescription': {'text': title},
             'fullDescription': {'text': description},
@@ -152,7 +153,7 @@ def to_sarif(report, model, root, baseline=None, uri_base=None):
         result = {
             'ruleId': cwe_id,
             'level': known.level if known else 'warning',
-            'message': {'text': f'{known.title if known else cwe_id}: {entry[2]} ({entry[1]}) reaches '
+            'message': {'text': f'{rule(cwe_id)["shortDescription"]["text"]}: {entry[2]} ({entry[1]}) reaches '
                                 f'{cls}#{method}' + (f' across {len(services) - 1} service call(s): '
                                                      f'{" -> ".join(services)}' if len(services) > 1 else '')
                                 + (f' through the database ({", ".join(stored)})' if stored else '')
